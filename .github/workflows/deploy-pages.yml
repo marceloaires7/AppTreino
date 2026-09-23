@@ -1,4 +1,4 @@
-# Builds the app as a static SPA and publishes it to GitHub Pages on every push to main.
+# Builds the app in Lovable/ as a static SPA and publishes it to GitHub Pages on every push to main.
 # Needs: Settings > Pages > Source = "GitHub Actions", and a repository variable VITE_API_URL
 # (Settings > Secrets and variables > Actions > Variables) holding the Apps Script /exec URL.
 name: Deploy to GitHub Pages
@@ -20,6 +20,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Lovable
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +57,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist/client
+          path: Lovable/dist/client
 
   deploy:
     needs: build

@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Dumbbell, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/LoadingState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -22,7 +23,10 @@ export const Route = createFileRoute("/trainer/student/$id")({
   head: () => ({
     meta: [
       { title: "Student Profile — IronLog" },
-      { name: "description", content: "Assign workouts, plan the week and review student progress." },
+      {
+        name: "description",
+        content: "Assign workouts, plan the week and review student progress.",
+      },
       { property: "og:title", content: "Student Profile — IronLog" },
       {
         property: "og:description",
@@ -40,14 +44,18 @@ function StudentProfile() {
   useRequireRole("trainer");
   const qc = useQueryClient();
 
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["trainer-student", id],
-    queryFn: async () => ({
-      student: await api.getUser(id),
-      workouts: await api.getStudentWorkouts(id),
-      schedule: await api.getSchedule(id),
-      history: await api.getHistory(id),
-    }),
+    queryFn: async () => {
+      // One getStudentData call serves the first three (see api.ts); stats load alongside it.
+      const [student, workouts, schedule, history] = await Promise.all([
+        api.getUser(id),
+        api.getStudentWorkouts(id),
+        api.getSchedule(id),
+        api.getHistory(id),
+      ]);
+      return { student, workouts, schedule, history };
+    },
   });
 
   async function assign(day: string, value: string) {
@@ -58,8 +66,7 @@ function StudentProfile() {
       };
       if (d !== day) return existing;
       if (value === "rest") return { day: d, type: "rest" as const };
-      if (value === "cardio")
-        return { day: d, type: "cardio" as const, label: "Cardio session" };
+      if (value === "cardio") return { day: d, type: "cardio" as const, label: "Cardio session" };
       return { day: d, type: "workout" as const, workoutId: value };
     });
     const schedule: Schedule = { studentId: id, days };
@@ -80,78 +87,84 @@ function StudentProfile() {
         </Button>
       }
     >
-      <Tabs defaultValue="workouts">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="workouts" className="h-10">
-            Workouts
-          </TabsTrigger>
-          <TabsTrigger value="week" className="h-10">
-            Week
-          </TabsTrigger>
-          <TabsTrigger value="progress" className="h-10">
-            Progress
-          </TabsTrigger>
-        </TabsList>
+      {isPending ? (
+        <LoadingState />
+      ) : (
+        <>
+          <Tabs defaultValue="workouts">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="workouts" className="h-10">
+                Workouts
+              </TabsTrigger>
+              <TabsTrigger value="week" className="h-10">
+                Week
+              </TabsTrigger>
+              <TabsTrigger value="progress" className="h-10">
+                Progress
+              </TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="workouts" className="mt-4 space-y-3">
-          <Button asChild className="h-14 w-full font-bold">
-            <Link to="/trainer/builder" search={{ student: id, workout: undefined }}>
-              <Plus className="size-5" /> New workout
-            </Link>
-          </Button>
-          {data?.workouts.map((w) => (
-            <Card key={w.id}>
-              <CardContent className="flex items-center gap-3 py-4">
-                <Dumbbell className="size-5 text-primary" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{w.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {w.exercises.length} exercises · {w.focus ?? "General"}
-                  </p>
-                </div>
-                <Button asChild variant="outline" size="icon" className="size-11 shrink-0">
-                  <Link to="/trainer/builder" search={{ student: id, workout: w.id }}>
-                    <Pencil className="size-4" />
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </TabsContent>
+            <TabsContent value="workouts" className="mt-4 space-y-3">
+              <Button asChild className="h-14 w-full font-bold">
+                <Link to="/trainer/builder" search={{ student: id, workout: undefined }}>
+                  <Plus className="size-5" /> New workout
+                </Link>
+              </Button>
+              {data?.workouts.map((w) => (
+                <Card key={w.id}>
+                  <CardContent className="flex items-center gap-3 py-4">
+                    <Dumbbell className="size-5 text-primary" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{w.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {w.exercises.length} exercises · {w.focus ?? "General"}
+                      </p>
+                    </div>
+                    <Button asChild variant="outline" size="icon" className="size-11 shrink-0">
+                      <Link to="/trainer/builder" search={{ student: id, workout: w.id }}>
+                        <Pencil className="size-4" />
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </TabsContent>
 
-        <TabsContent value="week" className="mt-4 space-y-3">
-          {WEEK_DAYS.map((day) => {
-            const entry = data?.schedule?.days.find((d) => d.day === day);
-            const value =
-              entry?.type === "workout" ? (entry.workoutId ?? "rest") : (entry?.type ?? "rest");
-            return (
-              <div key={day} className="space-y-1">
-                <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {day}
-                </p>
-                <Select value={value} onValueChange={(v) => assign(day, v)}>
-                  <SelectTrigger className="h-12">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="rest">Rest day</SelectItem>
-                    <SelectItem value="cardio">Cardio</SelectItem>
-                    {data?.workouts.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>
-                        {w.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            );
-          })}
-        </TabsContent>
+            <TabsContent value="week" className="mt-4 space-y-3">
+              {WEEK_DAYS.map((day) => {
+                const entry = data?.schedule?.days.find((d) => d.day === day);
+                const value =
+                  entry?.type === "workout" ? (entry.workoutId ?? "rest") : (entry?.type ?? "rest");
+                return (
+                  <div key={day} className="space-y-1">
+                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      {day}
+                    </p>
+                    <Select value={value} onValueChange={(v) => assign(day, v)}>
+                      <SelectTrigger className="h-12">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="rest">Rest day</SelectItem>
+                        <SelectItem value="cardio">Cardio</SelectItem>
+                        {data?.workouts.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })}
+            </TabsContent>
 
-        <TabsContent value="progress" className="mt-4">
-          <ProgressCharts history={data?.history ?? []} />
-        </TabsContent>
-      </Tabs>
+            <TabsContent value="progress" className="mt-4">
+              <ProgressCharts history={data?.history ?? []} />
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
     </AppShell>
   );
 }

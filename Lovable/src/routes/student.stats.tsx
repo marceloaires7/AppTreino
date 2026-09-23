@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { AppShell, TabBar } from "@/components/AppShell";
+import { LoadingState } from "@/components/LoadingState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -144,7 +145,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
 
 function StatsPage() {
   const user = useRequireRole("student");
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["history", user?.id],
     enabled: !!user,
     queryFn: () => (user ? api.getHistory(user.id) : Promise.resolve([])),
@@ -156,7 +157,13 @@ function StatsPage() {
       subtitle="Your lifting history"
       footer={<TabBar items={studentTabs} />}
     >
-      <ProgressCharts history={data ?? []} />
+      {isPending ? (
+        <LoadingState />
+      ) : (
+        <>
+          <ProgressCharts history={data ?? []} />
+        </>
+      )}
     </AppShell>
   );
 }

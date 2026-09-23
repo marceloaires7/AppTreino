@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BarChart3, CalendarDays, Dumbbell, Flame, Home, Moon, Play } from "lucide-react";
 import { AppShell, TabBar } from "@/components/AppShell";
+import { LoadingState } from "@/components/LoadingState";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +37,7 @@ function StudentHome() {
   const user = useRequireRole("student");
   const todayName = WEEK_DAYS[(new Date().getDay() + 6) % 7];
 
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["student-home", user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -63,81 +64,91 @@ function StudentHome() {
       subtitle={todayName}
       footer={<TabBar items={studentTabs} />}
     >
-      <Card className="border-primary/40 bg-gradient-to-br from-primary/15 to-transparent">
-        <CardHeader className="pb-2">
-          <Badge variant="secondary" className="w-fit">
-            Today's plan
-          </Badge>
-          <CardTitle className="pt-2 text-2xl">
-            {today?.type === "workout" && workout
-              ? workout.name
-              : today?.type === "cardio"
-                ? (today.label ?? "Cardio session")
-                : "Rest & recover"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {today?.type === "workout" && workout ? (
-            <>
-              <p className="text-sm text-muted-foreground">
-                {workout.exercises.length} exercises ·{" "}
-                {workout.exercises.reduce((s, e) => s + e.sets, 0)} total sets
-              </p>
-              <Button asChild className="h-16 w-full text-lg font-bold">
-                <Link to="/student/workout/$id" params={{ id: workout.id }}>
-                  <Play className="size-6" /> Start Workout
-                </Link>
-              </Button>
-            </>
-          ) : today?.type === "cardio" ? (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Flame className="size-4 text-primary" /> Get your session in and log it with your
-              coach.
-            </p>
-          ) : (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Moon className="size-4 text-primary" /> No training today. Sleep, eat, grow.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Volume · 7 days</p>
-            <p className="mt-1 text-2xl font-bold text-primary">
-              {Math.round(weekVolume).toLocaleString()} kg
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Sessions logged</p>
-            <p className="mt-1 text-2xl font-bold text-primary">{data?.history.length ?? 0}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        Recent sessions
-      </h2>
-      <div className="space-y-2">
-        {recent.map((h) => (
-          <Card key={h.id}>
-            <CardContent className="flex items-center gap-3 py-4">
-              <Dumbbell className="size-5 text-primary" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{h.workoutName}</p>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(h.date).toLocaleDateString()} ·{" "}
-                  {Math.round(h.totalVolume).toLocaleString()} kg
+      {isPending ? (
+        <LoadingState />
+      ) : (
+        <>
+          <Card className="border-primary/40 bg-gradient-to-br from-primary/15 to-transparent">
+            <CardHeader className="pb-2">
+              <Badge variant="secondary" className="w-fit">
+                Today's plan
+              </Badge>
+              <CardTitle className="pt-2 text-2xl">
+                {today?.type === "workout" && workout
+                  ? workout.name
+                  : today?.type === "cardio"
+                    ? (today.label ?? "Cardio session")
+                    : "Rest & recover"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {today?.type === "workout" && workout ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    {workout.exercises.length} exercises ·{" "}
+                    {workout.exercises.reduce((s, e) => s + e.sets, 0)} total sets
+                  </p>
+                  <Button asChild className="h-16 w-full text-lg font-bold">
+                    <Link to="/student/workout/$id" params={{ id: workout.id }}>
+                      <Play className="size-6" /> Start Workout
+                    </Link>
+                  </Button>
+                </>
+              ) : today?.type === "cardio" ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Flame className="size-4 text-primary" /> Get your session in and log it with your
+                  coach.
                 </p>
-              </div>
+              ) : (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Moon className="size-4 text-primary" /> No training today. Sleep, eat, grow.
+                </p>
+              )}
             </CardContent>
           </Card>
-        ))}
-      </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Volume · 7 days
+                </p>
+                <p className="mt-1 text-2xl font-bold text-primary">
+                  {Math.round(weekVolume).toLocaleString()} kg
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Sessions logged
+                </p>
+                <p className="mt-1 text-2xl font-bold text-primary">{data?.history.length ?? 0}</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Recent sessions
+          </h2>
+          <div className="space-y-2">
+            {recent.map((h) => (
+              <Card key={h.id}>
+                <CardContent className="flex items-center gap-3 py-4">
+                  <Dumbbell className="size-5 text-primary" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{h.workoutName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(h.date).toLocaleDateString()} ·{" "}
+                      {Math.round(h.totalVolume).toLocaleString()} kg
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
     </AppShell>
   );
 }

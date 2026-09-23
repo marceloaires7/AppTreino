@@ -4,6 +4,7 @@ import { ArrowLeft, Check, Flag, Info, Repeat } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/LoadingState";
 import { RestTimer } from "@/components/RestTimer";
 import { VideoDialog } from "@/components/VideoDialog";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +48,7 @@ function ActiveWorkout() {
   const { setLastSession } = useApp();
   const router = useRouter();
 
-  const { data: workout } = useQuery({
+  const { data: workout, isPending } = useQuery({
     queryKey: ["workout", id],
     queryFn: () => api.getWorkout(id),
   });
@@ -145,88 +146,98 @@ function ActiveWorkout() {
         </Button>
       }
     >
-      <div className="space-y-4">
-        {workout?.exercises.map((ex, exIndex) => (
-          <Card key={ex.id}>
-            <CardContent className="space-y-3 py-4">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-primary">Exercise {exIndex + 1}</p>
-                  <h3 className="text-base font-bold leading-tight">{ex.name}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {ex.sets} × {ex.reps} · rest {ex.restSec}s{ex.rir ? ` · ${ex.rir}` : ""}
-                  </p>
-                </div>
-                <VideoDialog name={ex.name} url={ex.videoUrl} />
-              </div>
-
-              {ex.notes ? (
-                <p className="flex items-start gap-2 rounded-md bg-secondary/60 p-2 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                  {ex.notes}
-                </p>
-              ) : null}
-              {ex.substitute ? (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Repeat className="size-3.5 text-primary" /> Substitute: {ex.substitute}
-                </p>
-              ) : null}
-
-              <div className="space-y-2">
-                {(sets[ex.id] ?? []).map((s, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Badge variant="secondary" className="h-11 w-11 justify-center rounded-md">
-                      {i + 1}
-                    </Badge>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      aria-label={`${ex.name} set ${i + 1} weight`}
-                      className="h-11 flex-1 text-center text-base"
-                      value={s.weight}
-                      onChange={(e) => update(ex.id, i, { weight: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-muted-foreground">kg</span>
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      aria-label={`${ex.name} set ${i + 1} reps`}
-                      className="h-11 flex-1 text-center text-base"
-                      value={s.reps}
-                      onChange={(e) => update(ex.id, i, { reps: Number(e.target.value) })}
-                    />
-                    <span className="text-xs text-muted-foreground">reps</span>
-                    <Button
-                      size="icon"
-                      aria-label={`Complete set ${i + 1}`}
-                      variant={s.done ? "default" : "outline"}
-                      className="size-11 shrink-0"
-                      onClick={() => {
-                        const next = !s.done;
-                        update(ex.id, i, { done: next });
-                        if (next) {
-                          setRest(ex.restSec);
-                          toast.success(`Set ${i + 1} logged`, {
-                            description: `${s.weight} kg × ${s.reps} reps`,
-                          });
-                        }
-                      }}
-                    >
-                      <Check className="size-5" />
-                    </Button>
+      {isPending ? (
+        <LoadingState />
+      ) : !workout ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">
+          This workout could not be loaded.
+        </p>
+      ) : (
+        <>
+          <div className="space-y-4">
+            {workout?.exercises.map((ex, exIndex) => (
+              <Card key={ex.id}>
+                <CardContent className="space-y-3 py-4">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-primary">Exercise {exIndex + 1}</p>
+                      <h3 className="text-base font-bold leading-tight">{ex.name}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {ex.sets} × {ex.reps} · rest {ex.restSec}s{ex.rir ? ` · ${ex.rir}` : ""}
+                      </p>
+                    </div>
+                    <VideoDialog name={ex.name} url={ex.videoUrl} />
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
 
-        <Button className="h-16 w-full text-lg font-bold" onClick={finish}>
-          <Flag className="size-5" /> Finish Workout
-        </Button>
-      </div>
+                  {ex.notes ? (
+                    <p className="flex items-start gap-2 rounded-md bg-secondary/60 p-2 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                      {ex.notes}
+                    </p>
+                  ) : null}
+                  {ex.substitute ? (
+                    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Repeat className="size-3.5 text-primary" /> Substitute: {ex.substitute}
+                    </p>
+                  ) : null}
 
-      {rest !== null ? <RestTimer seconds={rest} onDone={closeTimer} /> : null}
+                  <div className="space-y-2">
+                    {(sets[ex.id] ?? []).map((s, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <Badge variant="secondary" className="h-11 w-11 justify-center rounded-md">
+                          {i + 1}
+                        </Badge>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          aria-label={`${ex.name} set ${i + 1} weight`}
+                          className="h-11 flex-1 text-center text-base"
+                          value={s.weight}
+                          onChange={(e) => update(ex.id, i, { weight: Number(e.target.value) })}
+                        />
+                        <span className="text-xs text-muted-foreground">kg</span>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          aria-label={`${ex.name} set ${i + 1} reps`}
+                          className="h-11 flex-1 text-center text-base"
+                          value={s.reps}
+                          onChange={(e) => update(ex.id, i, { reps: Number(e.target.value) })}
+                        />
+                        <span className="text-xs text-muted-foreground">reps</span>
+                        <Button
+                          size="icon"
+                          aria-label={`Complete set ${i + 1}`}
+                          variant={s.done ? "default" : "outline"}
+                          className="size-11 shrink-0"
+                          onClick={() => {
+                            const next = !s.done;
+                            update(ex.id, i, { done: next });
+                            if (next) {
+                              setRest(ex.restSec);
+                              toast.success(`Set ${i + 1} logged`, {
+                                description: `${s.weight} kg × ${s.reps} reps`,
+                              });
+                            }
+                          }}
+                        >
+                          <Check className="size-5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            <Button className="h-16 w-full text-lg font-bold" onClick={finish}>
+              <Flag className="size-5" /> Finish Workout
+            </Button>
+          </div>
+
+          {rest !== null ? <RestTimer seconds={rest} onDone={closeTimer} /> : null}
+        </>
+      )}
     </AppShell>
   );
 }

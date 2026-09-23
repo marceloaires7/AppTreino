@@ -14,6 +14,9 @@ interface RequestOptions {
   quiet?: boolean;
 }
 
+// Reads (GET) are toasted once by the QueryCache in router.tsx after React Query's retry, so
+// only writes (POST) toast here. Any successful write also drops cached student data.
+
 async function request<T>(
   action: string,
   { params, body, quiet }: RequestOptions = {},
@@ -37,11 +40,12 @@ async function request<T>(
     if (!res.ok) throw new Error(`Server error (${res.status})`);
     const json = (await res.json()) as ApiResponse<T>;
     if (json.status !== "success") throw new Error(json.message);
+    if (body && action !== "login") studentDataCache.clear();
     return json.data;
   } catch (err) {
     const error =
       err instanceof TypeError ? new Error("Could not reach the server") : (err as Error);
-    if (!quiet) toast.error(error.message);
+    if (body && !quiet) toast.error(error.message);
     throw error;
   }
 }
@@ -52,19 +56,25 @@ interface StudentData {
   schedule: Schedule;
 }
 
-// Screens often ask for a student's workouts and schedule at the same time; both come from one
-// getStudentData call, so concurrent requests for the same student share it.
-const studentDataInFlight = new Map<string, Promise<StudentData>>();
+// Screens ask for a student's user, workouts and schedule separately, and each Apps Script call
+// takes seconds. All three come from one getStudentData call, which is shared while in flight
+// and reused for a few seconds after it succeeds.
+const STUDENT_DATA_TTL_MS = 15_000;
+const studentDataCache = new Map<string, { promise: Promise<StudentData>; expiresAt: number }>();
 
 function getStudentData(userId: string): Promise<StudentData> {
-  let pending = studentDataInFlight.get(userId);
-  if (!pending) {
-    pending = request<StudentData>("getStudentData", { params: { userId } }).finally(() =>
-      studentDataInFlight.delete(userId),
-    );
-    studentDataInFlight.set(userId, pending);
-  }
-  return pending;
+  const cached = studentDataCache.get(userId);
+  if (cached && Date.now() < cached.expiresAt) return cached.promise;
+  const entry = {
+    promise: request<StudentData>("getStudentData", { params: { userId } }),
+    expiresAt: Infinity,
+  };
+  studentDataCache.set(userId, entry);
+  entry.promise.then(
+    () => (entry.expiresAt = Date.now() + STUDENT_DATA_TTL_MS),
+    () => studentDataCache.get(userId) === entry && studentDataCache.delete(userId),
+  );
+  return entry.promise;
 }
 
 export const api = {

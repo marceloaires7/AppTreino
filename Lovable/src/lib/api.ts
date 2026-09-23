@@ -1,74 +1,118 @@
 /**
- * Data layer. Every function here is async so it can be swapped for
- * `fetch()` calls to the Google Apps Script REST API without touching UI code.
- * Today it reads/writes an in-memory store seeded from mockData.ts.
+ * Data layer. Every function calls the Google Apps Script backend (backend/Code.gs), whose
+ * /exec URL is read from VITE_API_URL at build time.
  */
-import { mockHistory, mockSchedules, mockUsers, mockWorkouts } from "./mockData";
+import { toast } from "sonner";
 import type { Schedule, SessionRecord, User, Workout } from "./types";
 
-const store = {
-  users: [...mockUsers],
-  workouts: [...mockWorkouts],
-  schedules: [...mockSchedules],
-  history: [...mockHistory],
-};
+type ApiResponse<T> = { status: "success"; data: T } | { status: "error"; message: string };
 
-const ok = <T>(value: T): Promise<T> => Promise.resolve(value);
+interface RequestOptions {
+  params?: Record<string, string>;
+  body?: object;
+  /** Don't toast on failure; the caller shows the error itself. */
+  quiet?: boolean;
+}
+
+async function request<T>(
+  action: string,
+  { params, body, quiet }: RequestOptions = {},
+): Promise<T> {
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (!apiUrl) throw new Error("VITE_API_URL is not set: add the Apps Script /exec URL");
+    const url = new URL(apiUrl);
+    url.searchParams.set("action", action);
+    for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value);
+
+    const res = await fetch(
+      url,
+      body && {
+        method: "POST",
+        // text/plain keeps this a CORS "simple" request: Apps Script cannot answer preflights.
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) throw new Error(`Server error (${res.status})`);
+    const json = (await res.json()) as ApiResponse<T>;
+    if (json.status !== "success") throw new Error(json.message);
+    return json.data;
+  } catch (err) {
+    const error =
+      err instanceof TypeError ? new Error("Could not reach the server") : (err as Error);
+    if (!quiet) toast.error(error.message);
+    throw error;
+  }
+}
+
+interface StudentData {
+  user: User;
+  workouts: Workout[];
+  schedule: Schedule;
+}
+
+// Screens often ask for a student's workouts and schedule at the same time; both come from one
+// getStudentData call, so concurrent requests for the same student share it.
+const studentDataInFlight = new Map<string, Promise<StudentData>>();
+
+function getStudentData(userId: string): Promise<StudentData> {
+  let pending = studentDataInFlight.get(userId);
+  if (!pending) {
+    pending = request<StudentData>("getStudentData", { params: { userId } }).finally(() =>
+      studentDataInFlight.delete(userId),
+    );
+    studentDataInFlight.set(userId, pending);
+  }
+  return pending;
+}
 
 export const api = {
-  login: (role: "trainer" | "student") =>
-    ok(store.users.find((u) => u.role === role) as User),
-
-  getUser: (id: string) => ok(store.users.find((u) => u.id === id) ?? null),
-
-  getStudents: (trainerId: string) =>
-    ok(store.users.filter((u) => u.role === "student" && u.trainerId === trainerId)),
-
-  getStudentWorkouts: (studentId: string) =>
-    ok(store.workouts.filter((w) => w.studentId === studentId)),
-
-  getWorkout: (id: string) => ok(store.workouts.find((w) => w.id === id) ?? null),
-
-  saveWorkout: (workout: Workout) => {
-    const i = store.workouts.findIndex((w) => w.id === workout.id);
-    if (i >= 0) store.workouts[i] = workout;
-    else store.workouts.push(workout);
-    return ok(workout);
-  },
-
-  deleteWorkout: (id: string) => {
-    store.workouts = store.workouts.filter((w) => w.id !== id);
-    return ok(true);
-  },
-
-  getSchedule: (studentId: string) =>
-    ok(store.schedules.find((s) => s.studentId === studentId) ?? null),
-
-  saveSchedule: (schedule: Schedule) => {
-    const i = store.schedules.findIndex((s) => s.studentId === schedule.studentId);
-    if (i >= 0) store.schedules[i] = schedule;
-    else store.schedules.push(schedule);
-    return ok(schedule);
-  },
-
-  getHistory: (studentId: string) =>
-    ok(
-      store.history
-        .filter((h) => h.studentId === studentId)
-        .sort((a, b) => +new Date(a.date) - +new Date(b.date)),
+  login: (login: string, password: string) =>
+    request<{ user: User }>("login", { body: { Login: login, Senha: password }, quiet: true }).then(
+      (d) => d.user,
     ),
 
-  saveWorkoutSession: (session: SessionRecord) => {
-    store.history.push(session);
-    return ok(session);
-  },
+  getUser: (id: string) => getStudentData(id).then((d) => d.user),
+
+  getStudents: (trainerId: string) =>
+    request<{ students: User[] }>("getTrainerDashboard", { params: { trainerId } }).then(
+      (d) => d.students,
+    ),
+
+  getStudentWorkouts: (studentId: string) => getStudentData(studentId).then((d) => d.workouts),
+
+  getWorkout: (id: string) =>
+    request<{ workout: Workout | null }>("getWorkout", { params: { workoutId: id } }).then(
+      (d) => d.workout,
+    ),
+
+  saveWorkout: (workout: Workout) =>
+    request<{ workout: Workout }>("saveWorkoutPlan", { body: { workout } }).then((d) => d.workout),
+
+  deleteWorkout: (id: string) =>
+    request("deleteWorkoutPlan", { body: { workoutId: id } }).then(() => true),
+
+  getSchedule: (studentId: string) => getStudentData(studentId).then((d) => d.schedule),
+
+  saveSchedule: (schedule: Schedule) =>
+    request<{ schedule: Schedule }>("updateSchedule", { body: { schedule } }).then(
+      (d) => d.schedule,
+    ),
+
+  getHistory: (studentId: string) =>
+    request<{ history: SessionRecord[] }>("getStudentStats", {
+      params: { userId: studentId },
+    }).then((d) => d.history),
+
+  saveWorkoutSession: (session: SessionRecord) =>
+    request<{ session: SessionRecord }>("saveWorkoutSession", { body: { session } }).then(
+      (d) => d.session,
+    ),
 };
 
 export function calcVolume(exercises: SessionRecord["exercises"]): number {
-  return exercises.reduce(
-    (sum, ex) => sum + ex.sets.reduce((v, s) => v + s.weight * s.reps, 0),
-    0,
-  );
+  return exercises.reduce((sum, ex) => sum + ex.sets.reduce((v, s) => v + s.weight * s.reps, 0), 0);
 }
 
 export function toEmbedUrl(url?: string): string | null {

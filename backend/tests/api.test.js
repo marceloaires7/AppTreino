@@ -119,6 +119,10 @@ test('getStudentData nests workouts, exercises and a full 7-day schedule', () =>
   assert.equal(days[2].workoutId, legs.id);
   assert.equal(days[6].type, 'rest');
 
+  assert.deepEqual(ok(gas.get({ action: 'getWorkout', workoutId: push.id })).workout, push);
+  assert.equal(ok(gas.get({ action: 'getWorkout', workoutId: 'nope' })).workout, null);
+  fail(gas.get({ action: 'getWorkout' }), /workoutId/);
+
   fail(gas.get({ action: 'getStudentData', userId: 'US-coach' }), /not a student/);
   fail(gas.get({ action: 'getStudentData', userId: 'ghost' }), /not found/);
   fail(gas.get({ action: 'getStudentData' }), /userId/);

@@ -78,7 +78,8 @@ How each mock method in `src/lib/api.ts` maps to the API:
 | `api.ts` today | Endpoint |
 | --- | --- |
 | `login` | `POST login`. The UI needs a Login/Senha form instead of the role picker |
-| `getUser`, `getStudentWorkouts`, `getWorkout`, `getSchedule` | `GET getStudentData` → `user`, `workouts`, `schedule` |
+| `getUser`, `getStudentWorkouts`, `getSchedule` | `GET getStudentData` → `user`, `workouts`, `schedule` |
+| `getWorkout` | `GET getWorkout` → `workout` |
 | `getStudents` | `GET getTrainerDashboard` → `students` |
 | `getHistory` | `GET getStudentStats` → `history` |
 | `saveWorkout` / `deleteWorkout` | `POST saveWorkoutPlan` / `POST deleteWorkoutPlan` |
@@ -134,6 +135,11 @@ never contains `Senha`:
 `sets`, `weight` and `restSec` are always numbers. `reps` is always a string, so ranges like
 `"8-12"` work. Empty optional fields are left out. `days` always covers all 7 days: a day with
 no Agenda row comes back as `rest`.
+
+### `GET getWorkout&workoutId={id}`
+
+Returns `{ "workout": Workout }` in the same shape as in `getStudentData`, or
+`{ "workout": null }` when no workout has that ID.
 
 ### `POST saveWorkoutSession`
 

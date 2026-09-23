@@ -94,6 +94,7 @@ class ApiError extends Error {
 const GET_ROUTES = {
   ping: () => ({ service: 'gym-training-api', version: API_VERSION, time: new Date().toISOString() }),
   getStudentData: (params) => getStudentData_(params.userId),
+  getWorkout: (params) => getWorkout_(params.workoutId),
   getStudentStats: (params) => getStudentStats_(params.userId),
   getTrainerDashboard: (params) => getTrainerDashboard_(params.trainerId),
 };
@@ -233,6 +234,18 @@ function getStudentData_(userId) {
     workouts: listWorkouts_(student.id),
     schedule: buildSchedule_(student.id),
   };
+}
+
+/**
+ * GET action=getWorkout&workoutId={id}
+ * Data: { workout: Workout | null }   (null when no workout has that ID)
+ */
+function getWorkout_(workoutId) {
+  if (!str_(workoutId)) throw new ApiError('Missing required parameter "workoutId"');
+  const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, workoutId));
+  if (!row) return { workout: null };
+  const exercises = readTable_(SHEET.EXERCISES).rows.filter((r) => sameId_(r.ID_Treino, workoutId));
+  return { workout: toWorkout_(row, exercises) };
 }
 
 function listWorkouts_(studentId) {

@@ -1,7 +1,7 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  beforeLoad: () => {
-    throw redirect({ to: "/login" });
-  },
+  // Redirect after mount rather than in beforeLoad: on the static GitHub Pages build, "/" is
+  // hydrated from the prerendered shell, and redirecting during hydration causes a mismatch.
+  component: () => <Navigate to="/login" replace />,
 });

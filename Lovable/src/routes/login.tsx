@@ -1,11 +1,11 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Dumbbell, ShieldCheck, User } from "lucide-react";
+import { Dumbbell } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useApp } from "@/context/AppContext";
-import type { Role } from "@/lib/types";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -30,10 +30,22 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { login } = useApp();
   const router = useRouter();
+  const [loginName, setLoginName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function go(role: Role) {
-    await login(role);
-    router.navigate({ to: role === "trainer" ? "/trainer" : "/student" });
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const user = await login(loginName.trim(), password);
+      router.navigate({ to: user.role === "trainer" ? "/trainer" : "/student" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign in failed");
+      setLoading(false);
+    }
   }
 
   return (
@@ -50,35 +62,45 @@ function LoginPage() {
         </div>
 
         <Card>
-          <CardContent className="space-y-4 pt-6">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="you@ironlog.app" className="h-12" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" className="h-12" />
-            </div>
-            <Button className="h-12 w-full text-base" onClick={() => go("student")}>
-              Sign in
-            </Button>
+          <CardContent className="pt-6">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="space-y-2">
+                <Label htmlFor="login">Login</Label>
+                <Input
+                  id="login"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  placeholder="your login"
+                  className="h-12"
+                  value={loginName}
+                  onChange={(e) => setLoginName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="h-12"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              {error && (
+                <p role="alert" className="text-sm font-medium text-destructive">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" className="h-12 w-full text-base" disabled={loading}>
+                {loading ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
           </CardContent>
         </Card>
-
-        <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-widest text-muted-foreground">
-          <span className="h-px flex-1 bg-border" />
-          demo access
-          <span className="h-px flex-1 bg-border" />
-        </div>
-
-        <div className="grid gap-3">
-          <Button variant="secondary" className="h-14 text-base" onClick={() => go("trainer")}>
-            <ShieldCheck className="size-5" /> Login as Trainer
-          </Button>
-          <Button variant="outline" className="h-14 text-base" onClick={() => go("student")}>
-            <User className="size-5" /> Login as Student
-          </Button>
-        </div>
       </div>
     </div>
   );

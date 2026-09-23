@@ -19,7 +19,10 @@ export const Route = createFileRoute("/student/workout/$id")({
   head: () => ({
     meta: [
       { title: "Active Workout — IronLog" },
-      { name: "description", content: "Log every set, weight and rep with an automatic rest timer." },
+      {
+        name: "description",
+        content: "Log every set, weight and rep with an automatic rest timer.",
+      },
       { property: "og:title", content: "Active Workout — IronLog" },
       {
         property: "og:description",
@@ -67,7 +70,8 @@ function ActiveWorkout() {
           ex.id,
           Array.from({ length: ex.sets }, () => ({
             weight: ex.weight,
-            reps: Number(String(ex.reps).replace(/\D/g, "")) || 10,
+            // "8-12" rep ranges start at their first number.
+            reps: parseInt(String(ex.reps), 10) || 10,
             done: false,
           })),
         ]),
@@ -82,7 +86,10 @@ function ActiveWorkout() {
     }));
 
   const completed = useMemo(
-    () => Object.values(sets).flat().filter((s) => s.done).length,
+    () =>
+      Object.values(sets)
+        .flat()
+        .filter((s) => s.done).length,
     [sets],
   );
   const totalSets = useMemo(() => Object.values(sets).flat().length, [sets]);

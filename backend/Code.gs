@@ -132,7 +132,7 @@ function doPost(e) {
 function doGet(e) {
   return respond_(() => {
     const action = str_(e && e.parameter && e.parameter.acao) || 'ping';
-    if (action !== 'ping') throw new ApiError('Use POST with { acao, args, token }');
+    if (action !== 'ping') throw new ApiError('Use POST com { acao, args, token }');
     return execute_('ping', [], '');
   });
 }
@@ -151,8 +151,8 @@ function execute_(action, args, token) {
   resetTableCache_();
   action = str_(action);
   args = Array.isArray(args) ? args : [];
-  if (!action) throw new ApiError('Missing "acao"');
-  if (!hasOwn_(ACTIONS, action)) throw new ApiError(`Unknown action "${action}"`);
+  if (!action) throw new ApiError('Falta a "acao"');
+  if (!hasOwn_(ACTIONS, action)) throw new ApiError(`Ação desconhecida: "${action}"`);
 
   const def = ACTIONS[action];
   const run = () => (def.public ? def.run.apply(null, args) : def.run.apply(null, [validateToken_(token)].concat(args)));
@@ -170,7 +170,7 @@ function respond_(fn) {
       if (err.code) payload.codigo = err.code;
     } else {
       console.error(err && err.stack ? err.stack : err);
-      payload = { ok: false, erro: 'Internal error: ' + (err && err.message ? err.message : err) };
+      payload = { ok: false, erro: 'Erro interno: ' + (err && err.message ? err.message : err) };
     }
   }
   return jsonResponse_(payload);
@@ -182,10 +182,10 @@ function parseBody_(e) {
   try {
     body = JSON.parse(e.postData.contents);
   } catch (err) {
-    throw new ApiError('Request body must be valid JSON');
+    throw new ApiError('O corpo da requisição precisa ser um JSON válido');
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new ApiError('Request body must be a JSON object');
+    throw new ApiError('O corpo da requisição precisa ser um objeto JSON');
   }
   return body;
 }
@@ -197,7 +197,7 @@ let lockDepth_ = 0;
 function withLock_(fn) {
   if (lockDepth_ > 0) return fn();
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) throw new ApiError('Server is busy, please try again');
+  if (!lock.tryLock(20000)) throw new ApiError('A planilha está ocupada. Tente de novo em alguns segundos');
   lockDepth_++;
   try {
     const result = fn();
@@ -271,7 +271,7 @@ function safeEqual_(a, b) {
 }
 
 function sessionError_() {
-  return new ApiError('Your session has expired. Please sign in again', SESSION_INVALID);
+  return new ApiError('Sua sessão expirou. Entre de novo', SESSION_INVALID);
 }
 
 function createToken_(userId) {
@@ -325,12 +325,12 @@ function findUserById_(id) {
 function login_(login, password) {
   login = normalizeLogin_(login);
   password = password == null ? '' : String(password);
-  if (!login || !password) throw new ApiError('Enter your login and password');
+  if (!login || !password) throw new ApiError('Informe usuário e senha');
 
   const cache = CacheService.getScriptCache();
   const failuresKey = 'login-failures:' + login;
   const failures = Number(cache.get(failuresKey) || 0);
-  if (failures >= MAX_LOGIN_ATTEMPTS) throw new ApiError('Too many attempts. Wait 15 minutes and try again');
+  if (failures >= MAX_LOGIN_ATTEMPTS) throw new ApiError('Muitas tentativas. Aguarde 15 minutos e tente de novo');
 
   const row = findUserByLogin_(login);
   let matches = false;
@@ -339,12 +339,12 @@ function login_(login, password) {
 
   if (!matches) {
     cache.put(failuresKey, String(failures + 1), LOCKOUT_SECONDS);
-    throw new ApiError('Invalid credentials');
+    throw new ApiError('Usuário ou senha incorretos');
   }
   cache.remove(failuresKey);
 
   const user = toUser_(row);
-  if (!user.role) throw new ApiError('This account has no valid Role (expected Trainer or Student)');
+  if (!user.role) throw new ApiError('Esta conta não tem um Role válido (use Trainer ou Student)');
   const session = createToken_(user.id);
   return { token: session.token, expiresAt: session.expiresAt, user: user };
 }
@@ -371,7 +371,7 @@ function setPassword_(userId, password) {
   withLock_(() => {
     delete tableCache_[SHEET.USERS];
     const row = findUserById_(userId);
-    if (!row) throw new ApiError(`User "${userId}" not found`);
+    if (!row) throw new ApiError(`Usuário "${userId}" não encontrado`);
     const salt = Utilities.getUuid();
     updateRecord_(SHEET.USERS, row, { Salt: salt, SenhaHash: hashPassword_(password, salt), Senha: '' });
   });
@@ -384,11 +384,11 @@ function setPassword_(userId, password) {
 function changePassword_(user, currentPassword, newPassword) {
   const next = newPassword == null ? '' : String(newPassword);
   if (next.length < MIN_PASSWORD_LENGTH) {
-    throw new ApiError(`The new password must have at least ${MIN_PASSWORD_LENGTH} characters`);
+    throw new ApiError(`A nova senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`);
   }
   const row = findUserById_(user.id);
   if (!row || !passwordMatches_(row, currentPassword == null ? '' : String(currentPassword))) {
-    throw new ApiError('The current password is incorrect');
+    throw new ApiError('A senha atual não confere');
   }
   setPassword_(user.id, next);
   return { changed: true };
@@ -405,21 +405,21 @@ function createUser_(account) {
   const name = str_(account.nome) || login;
   const role = normalizeRole_(account.role);
   if (!/^[a-z0-9._-]{3,30}$/.test(login)) {
-    throw new ApiError(`Login "${login}" must have 3-30 characters: lowercase letters, numbers, dot, dash or underscore`);
+    throw new ApiError(`O usuário "${login}" precisa ter de 3 a 30 caracteres: letras minúsculas, números, ponto, traço ou sublinhado`);
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
-    throw new ApiError(`The password for "${login}" must have at least ${MIN_PASSWORD_LENGTH} characters`);
+    throw new ApiError(`A senha de "${login}" precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`);
   }
-  if (!role) throw new ApiError(`The role for "${login}" must be Trainer or Student`);
+  if (!role) throw new ApiError(`O Role de "${login}" precisa ser Trainer ou Student`);
 
   return withLock_(() => {
     delete tableCache_[SHEET.USERS];
-    if (findUserByLogin_(login)) throw new ApiError(`Login "${login}" already exists`);
+    if (findUserByLogin_(login)) throw new ApiError(`Já existe o usuário "${login}"`);
     let trainerId = '';
     if (str_(account.treinador)) {
       const trainer = findUserByLogin_(account.treinador);
       if (!trainer || normalizeRole_(trainer.Role) !== 'trainer') {
-        throw new ApiError(`Trainer "${account.treinador}" not found`);
+        throw new ApiError(`Personal "${account.treinador}" não encontrado`);
       }
       trainerId = str_(trainer.ID_Usuario);
     }
@@ -443,16 +443,16 @@ function createUser_(account) {
 
 /** Loads a user by ID and checks its role. `paramName` is only used in error messages. */
 function requireUser_(id, role, paramName) {
-  if (!str_(id)) throw new ApiError(`Missing required parameter "${paramName}"`);
+  if (!str_(id)) throw new ApiError(`Falta o parâmetro "${paramName}"`);
   const row = findUserById_(id);
-  if (!row) throw new ApiError(`User "${id}" not found`);
+  if (!row) throw new ApiError(`Usuário "${id}" não encontrado`);
   const user = toUser_(row);
-  if (role && user.role !== role) throw new ApiError(`User "${id}" is not a ${role}`);
+  if (role && user.role !== role) throw new ApiError(`O usuário "${id}" não é ${role === 'trainer' ? 'personal' : 'aluno'}`);
   return user;
 }
 
 function requireRole_(user, role) {
-  if (user.role !== role) throw new ApiError(role === 'trainer' ? 'Only trainers can do this' : 'Only students can do this');
+  if (user.role !== role) throw new ApiError(role === 'trainer' ? 'Só o personal pode fazer isso' : 'Só o aluno pode fazer isso');
 }
 
 /**
@@ -470,7 +470,7 @@ function accessibleStudent_(user, studentId) {
 }
 
 function noAccessError_() {
-  return new ApiError('You do not have access to this student');
+  return new ApiError('Você não tem acesso a este aluno');
 }
 
 // ===============================================================================================
@@ -495,7 +495,7 @@ function getStudentData_(user, studentId) {
  * Data: { workout: Workout | null }   (null when no workout has that ID)
  */
 function getWorkout_(user, workoutId) {
-  if (!str_(workoutId)) throw new ApiError('Missing required parameter "workoutId"');
+  if (!str_(workoutId)) throw new ApiError('Falta o parâmetro "workoutId"');
   const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, workoutId));
   if (!row) return { workout: null };
   accessibleStudent_(user, str_(row.ID_Usuario));
@@ -547,7 +547,7 @@ function saveWorkoutSession_(user, session) {
   const input = session || {};
   const studentId = user.id;
   const exercises = input.exercises || [];
-  if (!Array.isArray(exercises)) throw new ApiError('"exercises" must be an array');
+  if (!Array.isArray(exercises)) throw new ApiError('"exercises" precisa ser uma lista');
 
   // A workout that is not the student's own is ignored; it is then inferred from the exercises.
   let workoutId = str_(input.workoutId);
@@ -560,8 +560,8 @@ function saveWorkoutSession_(user, session) {
   exercises.forEach((ex, i) => {
     const name = str_(ex && (ex.exerciseName || ex.name));
     const match = findExercise(str_(ex && ex.exerciseId), name);
-    if (!match && !name) throw new ApiError(`exercises[${i}] needs "exerciseId" or "exerciseName"`);
-    if (!Array.isArray(ex.sets)) throw new ApiError(`exercises[${i}].sets must be an array`);
+    if (!match && !name) throw new ApiError(`exercises[${i}] precisa de "exerciseId" ou "exerciseName"`);
+    if (!Array.isArray(ex.sets)) throw new ApiError(`exercises[${i}].sets precisa ser uma lista`);
     if (!workoutId && match) workoutId = str_(match.ID_Treino);
 
     ex.sets
@@ -636,7 +636,7 @@ function attachSets_(sessions, setRows) {
     if (!entry) return;
     const exerciseId = str_(r.ID_Exercicio);
     const plan = planned[exerciseId];
-    const name = plan ? str_(plan.Nome) : str_(r.Nome_Exercicio) || 'Unknown exercise';
+    const name = plan ? str_(plan.Nome) : str_(r.Nome_Exercicio) || 'Exercício removido';
     if (!entry.session.workoutId && plan) entry.session.workoutId = str_(plan.ID_Treino);
 
     const key = exerciseId || name.toLowerCase();
@@ -793,9 +793,9 @@ function calendarDaysBetween_(fromIso, to) {
 
 function describeActivity_(daysSince) {
   if (daysSince === null) return undefined;
-  if (daysSince <= 0) return 'Trained today';
-  if (daysSince === 1) return 'Trained yesterday';
-  return `${daysSince} days ago`;
+  if (daysSince <= 0) return 'Treinou hoje';
+  if (daysSince === 1) return 'Treinou ontem';
+  return `Há ${daysSince} dias`;
 }
 
 /**
@@ -813,11 +813,11 @@ function saveWorkoutPlan_(user, workout) {
   const input = workout || {};
   const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const name = str_(input.name);
-  if (!name) throw new ApiError('Workout "name" is required');
+  if (!name) throw new ApiError('Informe o nome do treino');
   const exercises = input.exercises || [];
-  if (!Array.isArray(exercises)) throw new ApiError('"exercises" must be an array');
+  if (!Array.isArray(exercises)) throw new ApiError('"exercises" precisa ser uma lista');
   exercises.forEach((ex, i) => {
-    if (!str_(ex && ex.name)) throw new ApiError(`exercises[${i}] is missing "name"`);
+    if (!str_(ex && ex.name)) throw new ApiError(`O exercício ${i + 1} está sem nome`);
   });
 
   const existing = str_(input.id)
@@ -874,9 +874,9 @@ function saveWorkoutPlan_(user, workout) {
 function deleteWorkoutPlan_(user, workoutId) {
   requireRole_(user, 'trainer');
   const id = str_(workoutId);
-  if (!id) throw new ApiError('Missing required parameter "workoutId"');
+  if (!id) throw new ApiError('Falta o parâmetro "workoutId"');
   const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, id));
-  if (!row) throw new ApiError(`Workout "${id}" not found`);
+  if (!row) throw new ApiError(`Treino "${id}" não encontrado`);
   accessibleStudent_(user, str_(row.ID_Usuario));
 
   const matches = (r) => sameId_(r.ID_Treino, id);
@@ -902,23 +902,23 @@ function updateSchedule_(user, schedule) {
   const input = schedule || {};
   const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const days = input.days;
-  if (!Array.isArray(days) || !days.length) throw new ApiError('"days" must be a non-empty array');
+  if (!Array.isArray(days) || !days.length) throw new ApiError('"days" precisa ser uma lista com pelo menos um dia');
 
   const workouts = indexBy_(readTable_(SHEET.WORKOUTS).rows, (r) => str_(r.ID_Treino));
   const records = days.map((d, i) => {
     d = d || {};
     const rawDay = d.dayNumber !== undefined ? d.dayNumber : d.day;
     const dayNumber = dayNumber_(rawDay);
-    if (!dayNumber) throw new ApiError(`days[${i}]: invalid day "${str_(rawDay)}" (use 1-7, Monday = 1, or an English weekday name)`);
+    if (!dayNumber) throw new ApiError(`days[${i}]: dia inválido "${str_(rawDay)}" (use 1 a 7, segunda = 1, ou o nome do dia em inglês)`);
     const type = normalizeActivity_(d.type);
-    if (!hasOwn_(ACTIVITY_TO_SHEET, type)) throw new ApiError(`days[${i}]: invalid type "${str_(d.type)}" (use workout, cardio or rest)`);
+    if (!hasOwn_(ACTIVITY_TO_SHEET, type)) throw new ApiError(`days[${i}]: tipo inválido "${str_(d.type)}" (use workout, cardio ou rest)`);
 
     let workoutId = '';
     if (type === 'workout') {
       workoutId = str_(d.workoutId);
       const workout = workouts[workoutId];
-      if (!workout) throw new ApiError(`days[${i}]: workout "${workoutId}" not found`);
-      if (!sameId_(workout.ID_Usuario, studentId)) throw new ApiError(`days[${i}]: workout "${workoutId}" belongs to another student`);
+      if (!workout) throw new ApiError(`days[${i}]: treino "${workoutId}" não encontrado`);
+      if (!sameId_(workout.ID_Usuario, studentId)) throw new ApiError(`days[${i}]: o treino "${workoutId}" é de outro aluno`);
     }
     return {
       ID_Agenda: generateId_('AG'),
@@ -958,14 +958,14 @@ function cadastrarUsuarios() {
   resetTableCache_();
   accounts.forEach((account) => {
     if (account.senha === 'troque-esta-senha') {
-      console.log(`Skipped "${account.login}": change the example password first.`);
+      console.log(`Pulei "${account.login}": troque a senha de exemplo antes de rodar.`);
       return;
     }
     try {
       const user = createUser_(account);
-      console.log(`Created ${user.role} "${account.login}" (${user.name}), ID ${user.id}.`);
+      console.log(`Criado ${user.role === 'trainer' ? 'o personal' : 'o aluno'} "${account.login}" (${user.name}), ID ${user.id}.`);
     } catch (err) {
-      console.log(`Error for "${account.login}": ${err.message}`);
+      console.log(`Erro em "${account.login}": ${err.message}`);
     }
   });
 }
@@ -978,22 +978,22 @@ function redefinirSenha() {
   const LOGIN = 'aluno1';
   const NOVA_SENHA = 'troque-esta-senha';
   if (NOVA_SENHA === 'troque-esta-senha') {
-    console.log('Change NOVA_SENHA first.');
+    console.log('Troque NOVA_SENHA antes de rodar.');
     return;
   }
   if (NOVA_SENHA.length < MIN_PASSWORD_LENGTH) {
-    console.log(`The password must have at least ${MIN_PASSWORD_LENGTH} characters.`);
+    console.log(`A senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`);
     return;
   }
   resetTableCache_();
   const row = findUserByLogin_(LOGIN);
   if (!row) {
-    console.log(`Login "${LOGIN}" not found.`);
+    console.log(`Usuário "${LOGIN}" não encontrado.`);
     return;
   }
   setPassword_(str_(row.ID_Usuario), NOVA_SENHA);
   CacheService.getScriptCache().remove('login-failures:' + normalizeLogin_(LOGIN));
-  console.log(`New password saved for "${LOGIN}".`);
+  console.log(`Nova senha salva para "${LOGIN}".`);
 }
 
 /**
@@ -1020,7 +1020,7 @@ function setupDatabase() {
     console.log(`${name}: ok`);
   });
   const migrated = migratePlainTextPasswords_();
-  console.log(`${migrated} plain-text password(s) replaced by a hash.`);
+  console.log(`${migrated} senha(s) em texto puro trocada(s) por hash.`);
 }
 
 /** Hashes every legacy plain-text Senha and blanks it. Returns how many were converted. */
@@ -1039,32 +1039,32 @@ function migratePlainTextPasswords_() {
 function seedDemoData() {
   setupDatabase();
   if (readTable_(SHEET.USERS).rows.length) {
-    console.log('Usuarios already has data; seed skipped.');
+    console.log('A aba Usuarios já tem dados; o exemplo não foi criado.');
     return;
   }
-  const coach = createUser_({ login: 'coach', senha: 'coach123', nome: 'Coach Alex Moreira', role: 'Trainer' });
+  const coach = createUser_({ login: 'coach', senha: 'coach123', nome: 'Alex Moreira', role: 'Trainer' });
   const student = createUser_({ login: 'aluno', senha: 'aluno123', nome: 'Aluno Demo', role: 'Student', treinador: 'coach' });
 
   const push = saveWorkoutPlan_(coach, {
     studentId: student.id,
-    name: 'Push A - Chest & Shoulders',
-    focus: 'Upper push',
+    name: 'Treino A - Peito e Ombros',
+    focus: 'Superiores (empurrar)',
     exercises: [
-      { name: 'Barbell Bench Press', sets: 4, reps: '8', weight: 80, restSec: 120, rir: 'RIR 2',
-        videoUrl: 'https://www.youtube.com/watch?v=rT7DgCr-3pg', substitute: 'Dumbbell Bench Press',
-        notes: 'Keep chest up, shoulder blades retracted.' },
-      { name: 'Incline Dumbbell Press', sets: 3, reps: '8-10', weight: 28, restSec: 90 },
-      { name: 'Cable Triceps Pushdown', sets: 3, reps: '12-15', weight: 30, restSec: 60 },
+      { name: 'Supino reto com barra', sets: 4, reps: '8', weight: 80, restSec: 120, rir: 'RIR 2',
+        videoUrl: 'https://www.youtube.com/watch?v=rT7DgCr-3pg', substitute: 'Supino reto com halteres',
+        notes: 'Peito aberto e escápulas retraídas.' },
+      { name: 'Supino inclinado com halteres', sets: 3, reps: '8-10', weight: 28, restSec: 90 },
+      { name: 'Tríceps na polia', sets: 3, reps: '12-15', weight: 30, restSec: 60 },
     ],
   }).workout;
   const legs = saveWorkoutPlan_(coach, {
     studentId: student.id,
-    name: 'Legs - Squat Focus',
-    focus: 'Lower body',
+    name: 'Treino B - Pernas',
+    focus: 'Inferiores',
     exercises: [
-      { name: 'Back Squat', sets: 5, reps: '5', weight: 100, restSec: 180, rir: 'RPE 8',
+      { name: 'Agachamento livre', sets: 5, reps: '5', weight: 100, restSec: 180, rir: 'RPE 8',
         videoUrl: 'https://www.youtube.com/watch?v=ultWZbUMPL8' },
-      { name: 'Romanian Deadlift', sets: 3, reps: '10', weight: 70, restSec: 120 },
+      { name: 'Levantamento terra romeno', sets: 3, reps: '10', weight: 70, restSec: 120 },
     ],
   }).workout;
 
@@ -1072,16 +1072,16 @@ function seedDemoData() {
     studentId: student.id,
     days: [
       { day: 'Monday', type: 'workout', workoutId: push.id },
-      { day: 'Tuesday', type: 'cardio', label: '30 min zone 2 bike' },
+      { day: 'Tuesday', type: 'cardio', label: '30 min de bike (zona 2)' },
       { day: 'Wednesday', type: 'workout', workoutId: legs.id },
       { day: 'Thursday', type: 'rest' },
       { day: 'Friday', type: 'workout', workoutId: push.id },
-      { day: 'Saturday', type: 'cardio', label: '45 min run' },
+      { day: 'Saturday', type: 'cardio', label: '45 min de corrida' },
       { day: 'Sunday', type: 'rest' },
     ],
   });
   SpreadsheetApp.flush();
-  console.log(`Seeded trainer ${coach.id} and student ${student.id}.`);
+  console.log(`Criados o personal ${coach.id} e o aluno ${student.id}.`);
 }
 
 // ===============================================================================================

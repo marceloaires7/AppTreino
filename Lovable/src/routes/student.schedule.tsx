@@ -8,18 +8,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { dayLabel, plural } from "@/lib/format";
 import { WEEK_DAYS } from "@/lib/types";
 import { studentTabs } from "./student.index";
 
 export const Route = createFileRoute("/student/schedule")({
   head: () => ({
     meta: [
-      { title: "Weekly Plan — IronLog" },
-      { name: "description", content: "Your Monday to Sunday training plan set by your coach." },
-      { property: "og:title", content: "Weekly Plan — IronLog" },
+      { title: "Semana — IronLog" },
+      {
+        name: "description",
+        content: "Seu plano de segunda a domingo, montado pelo seu personal.",
+      },
+      { property: "og:title", content: "Semana — IronLog" },
       {
         property: "og:description",
-        content: "Your Monday to Sunday training plan set by your coach.",
+        content: "Seu plano de segunda a domingo, montado pelo seu personal.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -45,7 +49,11 @@ function SchedulePage() {
   });
 
   return (
-    <AppShell title="Your week" subtitle="Monday to Sunday" footer={<TabBar items={studentTabs} />}>
+    <AppShell
+      title="Sua semana"
+      subtitle="Segunda a domingo"
+      footer={<TabBar items={studentTabs} />}
+    >
       {isPending ? (
         <LoadingState />
       ) : (
@@ -59,9 +67,11 @@ function SchedulePage() {
                 <Card key={day} className={isToday ? "border-primary/60" : undefined}>
                   <CardContent className="flex items-center gap-3 py-4">
                     <div className="w-12 shrink-0">
-                      <p className="text-xs font-bold uppercase tracking-wide">{day.slice(0, 3)}</p>
+                      <p className="text-xs font-bold uppercase tracking-wide">
+                        {dayLabel(day).slice(0, 3)}
+                      </p>
                       {isToday ? (
-                        <Badge className="mt-1 px-1.5 py-0 text-[10px]">Today</Badge>
+                        <Badge className="mt-1 px-1.5 py-0 text-[10px]">Hoje</Badge>
                       ) : null}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -74,14 +84,14 @@ function SchedulePage() {
                           <Moon className="size-4 text-muted-foreground" />
                         )}
                         {entry?.type === "workout"
-                          ? (workout?.name ?? "Workout")
+                          ? (workout?.name ?? "Treino")
                           : entry?.type === "cardio"
                             ? (entry.label ?? "Cardio")
-                            : "Rest day"}
+                            : "Descanso"}
                       </p>
                       {entry?.type === "workout" && workout ? (
                         <p className="text-xs text-muted-foreground">
-                          {workout.exercises.length} exercises
+                          {plural(workout.exercises.length, "exercício", "exercícios")}
                         </p>
                       ) : null}
                     </div>

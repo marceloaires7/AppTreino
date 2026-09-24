@@ -43,7 +43,8 @@ interface CallOptions {
 async function call<T>(acao: string, args: unknown[] = [], options: CallOptions = {}): Promise<T> {
   try {
     const apiUrl = import.meta.env.VITE_API_URL;
-    if (!apiUrl) throw new ApiError("VITE_API_URL is not set: add the Apps Script /exec URL");
+    if (!apiUrl)
+      throw new ApiError("VITE_API_URL não configurada: informe a URL /exec do Apps Script");
 
     let res: Response;
     try {
@@ -54,9 +55,9 @@ async function call<T>(acao: string, args: unknown[] = [], options: CallOptions 
         body: JSON.stringify({ acao, args, token: readSession()?.token ?? "" }),
       });
     } catch {
-      throw new ApiError("Could not reach the server");
+      throw new ApiError("Sem conexão com o servidor");
     }
-    if (!res.ok) throw new ApiError(`Server error (${res.status})`);
+    if (!res.ok) throw new ApiError(`Erro no servidor (${res.status})`);
 
     let body: ApiResponse<T>;
     try {
@@ -64,7 +65,7 @@ async function call<T>(acao: string, args: unknown[] = [], options: CallOptions 
     } catch {
       // A deployment not shared with "Anyone" answers with Google's sign-in page.
       throw new ApiError(
-        'Unexpected server response. Check that the deployment is shared with "Anyone"',
+        'Resposta inesperada do servidor. Confira se a implantação está como "Qualquer pessoa"',
       );
     }
     if (!body.ok) {
@@ -72,7 +73,7 @@ async function call<T>(acao: string, args: unknown[] = [], options: CallOptions 
         clearSession();
         onSessionExpired?.();
       }
-      throw new ApiError(body.erro || "Server error", body.codigo);
+      throw new ApiError(body.erro || "Erro no servidor", body.codigo);
     }
     if (options.write) studentDataCache.clear();
     return body.dados;

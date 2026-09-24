@@ -34,7 +34,7 @@ export function AppShell({ title, subtitle, back, children, footer }: Props) {
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Log out"
+                aria-label="Sair"
                 className="size-11"
                 onClick={() => {
                   logout();

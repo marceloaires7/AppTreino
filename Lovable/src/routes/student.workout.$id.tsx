@@ -14,20 +14,21 @@ import { Input } from "@/components/ui/input";
 import { useApp } from "@/context/AppContext";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api, calcVolume } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import type { SessionRecord } from "@/lib/types";
 
 export const Route = createFileRoute("/student/workout/$id")({
   head: () => ({
     meta: [
-      { title: "Active Workout — IronLog" },
+      { title: "Treino em andamento — IronLog" },
       {
         name: "description",
-        content: "Log every set, weight and rep with an automatic rest timer.",
+        content: "Registre cada série, carga e repetição, com cronômetro de descanso automático.",
       },
-      { property: "og:title", content: "Active Workout — IronLog" },
+      { property: "og:title", content: "Treino em andamento — IronLog" },
       {
         property: "og:description",
-        content: "Log every set, weight and rep with an automatic rest timer.",
+        content: "Registre cada série, carga e repetição, com cronômetro de descanso automático.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -136,8 +137,8 @@ function ActiveWorkout() {
 
   return (
     <AppShell
-      title={workout?.name ?? "Workout"}
-      subtitle={`${mm}:${ss} · ${completed}/${totalSets} sets · ${Math.round(liveVolume)} kg`}
+      title={workout?.name ?? "Treino"}
+      subtitle={`${mm}:${ss} · ${completed}/${totalSets} séries · ${formatNumber(liveVolume)} kg`}
       back={
         <Button asChild variant="ghost" size="icon" className="size-11 shrink-0">
           <Link to="/student">
@@ -150,7 +151,7 @@ function ActiveWorkout() {
         <LoadingState />
       ) : !workout ? (
         <p className="py-16 text-center text-sm text-muted-foreground">
-          This workout could not be loaded.
+          Não foi possível carregar este treino.
         </p>
       ) : (
         <>
@@ -160,10 +161,10 @@ function ActiveWorkout() {
                 <CardContent className="space-y-3 py-4">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-primary">Exercise {exIndex + 1}</p>
+                      <p className="text-xs font-semibold text-primary">Exercício {exIndex + 1}</p>
                       <h3 className="text-base font-bold leading-tight">{ex.name}</h3>
                       <p className="text-xs text-muted-foreground">
-                        {ex.sets} × {ex.reps} · rest {ex.restSec}s{ex.rir ? ` · ${ex.rir}` : ""}
+                        {ex.sets} × {ex.reps} · descanso {ex.restSec}s{ex.rir ? ` · ${ex.rir}` : ""}
                       </p>
                     </div>
                     <VideoDialog name={ex.name} url={ex.videoUrl} />
@@ -177,7 +178,7 @@ function ActiveWorkout() {
                   ) : null}
                   {ex.substitute ? (
                     <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Repeat className="size-3.5 text-primary" /> Substitute: {ex.substitute}
+                      <Repeat className="size-3.5 text-primary" /> Substituto: {ex.substitute}
                     </p>
                   ) : null}
 
@@ -190,7 +191,7 @@ function ActiveWorkout() {
                         <Input
                           type="number"
                           inputMode="decimal"
-                          aria-label={`${ex.name} set ${i + 1} weight`}
+                          aria-label={`${ex.name}, série ${i + 1}, carga`}
                           className="h-11 flex-1 text-center text-base"
                           value={s.weight}
                           onChange={(e) => update(ex.id, i, { weight: Number(e.target.value) })}
@@ -199,7 +200,7 @@ function ActiveWorkout() {
                         <Input
                           type="number"
                           inputMode="numeric"
-                          aria-label={`${ex.name} set ${i + 1} reps`}
+                          aria-label={`${ex.name}, série ${i + 1}, repetições`}
                           className="h-11 flex-1 text-center text-base"
                           value={s.reps}
                           onChange={(e) => update(ex.id, i, { reps: Number(e.target.value) })}
@@ -207,7 +208,7 @@ function ActiveWorkout() {
                         <span className="text-xs text-muted-foreground">reps</span>
                         <Button
                           size="icon"
-                          aria-label={`Complete set ${i + 1}`}
+                          aria-label={`Concluir série ${i + 1}`}
                           variant={s.done ? "default" : "outline"}
                           className="size-11 shrink-0"
                           onClick={() => {
@@ -215,7 +216,7 @@ function ActiveWorkout() {
                             update(ex.id, i, { done: next });
                             if (next) {
                               setRest(ex.restSec);
-                              toast.success(`Set ${i + 1} logged`, {
+                              toast.success(`Série ${i + 1} registrada`, {
                                 description: `${s.weight} kg × ${s.reps} reps`,
                               });
                             }
@@ -231,7 +232,7 @@ function ActiveWorkout() {
             ))}
 
             <Button className="h-16 w-full text-lg font-bold" onClick={finish}>
-              <Flag className="size-5" /> Finish Workout
+              <Flag className="size-5" /> Finalizar treino
             </Button>
           </div>
 

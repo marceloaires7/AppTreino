@@ -38,8 +38,8 @@ function seeded() {
   const coach = token(gas, 'coach', 'coach123');
   const aluno = token(gas, 'aluno', 'aluno123');
   const data = ok(gas.call('getStudentData', [], aluno));
-  const push = data.workouts.find((w) => w.name.startsWith('Push'));
-  const legs = data.workouts.find((w) => w.name.startsWith('Legs'));
+  const push = data.workouts.find((w) => w.name.startsWith('Treino A'));
+  const legs = data.workouts.find((w) => w.name.startsWith('Treino B'));
   return { gas, coach, aluno, push, legs };
 }
 
@@ -62,8 +62,8 @@ function squatSession(legs, weight, date) {
     durationSec: 3600,
     totalVolume: 999999, // the server must ignore this and recompute
     exercises: [
-      { exerciseName: 'Back Squat', sets: [{ weight, reps: 5 }, { weight, reps: 5 }, { weight: weight + 5, reps: 3 }] },
-      { exerciseName: 'Romanian Deadlift', sets: [{ weight: 70, reps: 10 }] },
+      { exerciseName: 'Agachamento livre', sets: [{ weight, reps: 5 }, { weight, reps: 5 }, { weight: weight + 5, reps: 3 }] },
+      { exerciseName: 'Levantamento terra romeno', sets: [{ weight: 70, reps: 10 }] },
     ],
   };
 }
@@ -89,7 +89,7 @@ test('setupDatabase creates every tab and column, formats text columns and is id
 
 test('tabs and columns are created on first use, without running setupDatabase', () => {
   const gas = createGas();
-  fail(gas.call('login', ['nobody', 'whatever']), /^Invalid credentials$/);
+  fail(gas.call('login', ['nobody', 'whatever']), /^Usuário ou senha incorretos$/);
   assert.ok(gas.sheet('Usuarios'), 'Usuarios was created by the login');
 
   // A PRD-era tab gains the new columns and keeps its data.
@@ -128,20 +128,20 @@ test('login returns a token and the user, never secrets', () => {
   const data = ok(res);
   assert.match(data.token, /^[A-Za-z0-9_-]+={0,2}\.[0-9a-f]{64}$/);
   assert.ok(data.expiresAt > Date.now() + 29 * 864e5);
-  assert.deepEqual(data.user, { id: 'US-coach', name: 'Coach Alex Moreira', role: 'trainer', initials: 'CM' });
+  assert.deepEqual(data.user, { id: 'US-coach', name: 'Alex Moreira', role: 'trainer', initials: 'AM' });
   for (const word of ['coach123', 'Salt', 'SenhaHash', 'Senha']) assert.ok(!JSON.stringify(res).includes(word), word);
 
-  fail(gas.call('login', ['coach', 'wrong']), /^Invalid credentials$/);
-  fail(gas.call('login', ['nobody', 'coach123']), /^Invalid credentials$/);
-  fail(gas.call('login', ['coach']), /Enter your login and password/);
+  fail(gas.call('login', ['coach', 'wrong']), /^Usuário ou senha incorretos$/);
+  fail(gas.call('login', ['nobody', 'coach123']), /^Usuário ou senha incorretos$/);
+  fail(gas.call('login', ['coach']), /Informe usuário e senha/);
 });
 
 test('five wrong passwords lock that login for 15 minutes', () => {
   const { gas } = seeded();
-  for (let i = 0; i < 4; i++) fail(gas.call('login', ['aluno', 'nope']), /Invalid credentials/);
+  for (let i = 0; i < 4; i++) fail(gas.call('login', ['aluno', 'nope']), /Usuário ou senha incorretos/);
   ok(gas.call('login', ['aluno', 'aluno123'])); // a success resets the counter
-  for (let i = 0; i < 5; i++) fail(gas.call('login', ['aluno', 'nope']), /Invalid credentials/);
-  fail(gas.call('login', ['aluno', 'aluno123']), /Too many attempts/);
+  for (let i = 0; i < 5; i++) fail(gas.call('login', ['aluno', 'nope']), /Usuário ou senha incorretos/);
+  fail(gas.call('login', ['aluno', 'aluno123']), /Muitas tentativas/);
   ok(gas.call('login', ['coach', 'coach123'])); // other logins are unaffected
   gas.expireCache();
   ok(gas.call('login', ['aluno', 'aluno123']));
@@ -151,26 +151,26 @@ test('only a valid, unexpired token signed by this deployment is accepted', () =
   const { gas, aluno } = seeded();
   ok(gas.call('getStudentData', [], aluno));
   const SESSION = 'SESSAO_INVALIDA';
-  fail(gas.call('getStudentData', []), /session has expired/, SESSION);
-  fail(gas.call('getStudentData', [], 'garbage'), /session has expired/, SESSION);
-  fail(gas.call('getStudentData', [], 'a.b.c'), /session has expired/, SESSION);
+  fail(gas.call('getStudentData', []), /sessão expirou/, SESSION);
+  fail(gas.call('getStudentData', [], 'garbage'), /sessão expirou/, SESSION);
+  fail(gas.call('getStudentData', [], 'a.b.c'), /sessão expirou/, SESSION);
 
   // Swapping the user inside the payload breaks the signature.
   const [payload, signature] = aluno.split('.');
   const forgedPayload = Buffer.from(Buffer.from(payload, 'base64url').toString().replace('US-aluno', 'US-coach')).toString('base64url');
-  fail(gas.call('getTrainerDashboard', [], `${forgedPayload}.${signature}`), /session/, SESSION);
+  fail(gas.call('getTrainerDashboard', [], `${forgedPayload}.${signature}`), /sessão/, SESSION);
 
   // Signed with another secret, or expired.
   const otherDeployment = `${forgedPayload}.${crypto.createHmac('sha256', 'other').update(forgedPayload).digest('hex')}`;
-  fail(gas.call('getTrainerDashboard', [], otherDeployment), /session/, SESSION);
-  fail(gas.call('getStudentData', [], signToken(gas, `US-aluno|${Date.now() - 1000}`)), /session/, SESSION);
+  fail(gas.call('getTrainerDashboard', [], otherDeployment), /sessão/, SESSION);
+  fail(gas.call('getStudentData', [], signToken(gas, `US-aluno|${Date.now() - 1000}`)), /sessão/, SESSION);
   ok(gas.call('getStudentData', [], signToken(gas, `US-aluno|${Date.now() + 60000}`)));
 
   // An account deleted after signing in loses its sessions.
   const sheet = gas.sheet('Usuarios');
   const rowNumber = sheet.records().findIndex((r) => r.Login === 'aluno') + 2;
   sheet.getRange(rowNumber, 1, 1, sheet.getLastColumn()).clearContent();
-  fail(gas.call('getStudentData', [], aluno), /session/, SESSION);
+  fail(gas.call('getStudentData', [], aluno), /sessão/, SESSION);
 });
 
 test('plain-text passwords from older sheets are hashed on first login or by setupDatabase', () => {
@@ -179,7 +179,7 @@ test('plain-text passwords from older sheets are hashed on first login or by set
     ['US-t', 'Trainer', 'coach', 'coach123', 'Trainer', ''],
     ['US-s', 'Student', 'aluno', 1234, 'Student', 'US-t'], // typed as a number in the sheet
   ]);
-  fail(gas.call('login', ['coach', 'wrong']), /Invalid credentials/);
+  fail(gas.call('login', ['coach', 'wrong']), /Usuário ou senha incorretos/);
   ok(gas.call('login', ['coach', 'coach123']));
   let coach = gas.sheet('Usuarios').records().find((r) => r.Login === 'coach');
   assert.equal(coach.Senha, '', 'plain text removed');
@@ -195,10 +195,10 @@ test('plain-text passwords from older sheets are hashed on first login or by set
 
 test('changePassword needs the current password and replaces the hash', () => {
   const { gas, aluno } = seeded();
-  fail(gas.call('changePassword', ['wrong', 'new-password'], aluno), /current password is incorrect/);
-  fail(gas.call('changePassword', ['aluno123', '123'], aluno), /at least 6 characters/);
+  fail(gas.call('changePassword', ['wrong', 'new-password'], aluno), /senha atual não confere/);
+  fail(gas.call('changePassword', ['aluno123', '123'], aluno), /pelo menos 6 caracteres/);
   assert.deepEqual(ok(gas.call('changePassword', ['aluno123', 'new-password'], aluno)), { changed: true });
-  fail(gas.call('login', ['aluno', 'aluno123']), /Invalid credentials/);
+  fail(gas.call('login', ['aluno', 'aluno123']), /Usuário ou senha incorretos/);
   ok(gas.call('login', ['aluno', 'new-password']));
   ok(gas.call('getStudentData', [], aluno)); // existing sessions stay valid
 });
@@ -214,11 +214,11 @@ test('createUser_ validates accounts and links students to their trainer', () =>
       return err.message;
     }
   };
-  assert.match(create({ login: 'A B', senha: 'secret1', role: 'Student' }), /3-30 characters/);
-  assert.match(create({ login: 'short', senha: '123', role: 'Student' }), /at least 6/);
-  assert.match(create({ login: 'norole', senha: 'secret1', role: 'Admin' }), /Trainer or Student/);
-  assert.match(create({ login: 'COACH', senha: 'secret1', role: 'Trainer' }), /already exists/);
-  assert.match(create({ login: 'orphan', senha: 'secret1', role: 'Student', treinador: 'ghost' }), /Trainer "ghost" not found/);
+  assert.match(create({ login: 'A B', senha: 'secret1', role: 'Student' }), /de 3 a 30 caracteres/);
+  assert.match(create({ login: 'short', senha: '123', role: 'Student' }), /pelo menos 6/);
+  assert.match(create({ login: 'norole', senha: 'secret1', role: 'Admin' }), /Trainer ou Student/);
+  assert.match(create({ login: 'COACH', senha: 'secret1', role: 'Trainer' }), /Já existe/);
+  assert.match(create({ login: 'orphan', senha: 'secret1', role: 'Student', treinador: 'ghost' }), /Personal "ghost" não encontrado/);
   assert.equal(create({ login: 'maria', senha: 'secret1', nome: 'Maria', role: 'Student', treinador: 'coach' }), 'created');
   const maria = gas.sheet('Usuarios').records().find((r) => r.Login === 'maria');
   assert.equal(maria.ID_Usuario, 'US-maria');
@@ -239,16 +239,16 @@ test('students only reach their own data and cannot use trainer actions', () => 
   addUsers(gas, [{ login: 'other', senha: 'secret1', nome: 'Other', role: 'Student', treinador: 'coach' }]);
   const theirWorkout = ok(gas.call('saveWorkoutPlan', [{ studentId: 'US-other', name: 'Theirs', exercises: [] }], coach)).workout;
 
-  fail(gas.call('getStudentData', ['US-other'], aluno), /no access|do not have access/);
-  fail(gas.call('getStudentStats', ['US-other'], aluno), /do not have access/);
-  fail(gas.call('getWorkout', [theirWorkout.id], aluno), /do not have access/);
+  fail(gas.call('getStudentData', ['US-other'], aluno), /não tem acesso/);
+  fail(gas.call('getStudentStats', ['US-other'], aluno), /não tem acesso/);
+  fail(gas.call('getWorkout', [theirWorkout.id], aluno), /não tem acesso/);
   assert.equal(ok(gas.call('getWorkout', [push.id], aluno)).workout.id, push.id);
   assert.equal(ok(gas.call('getStudentData', ['US-aluno'], aluno)).user.id, 'US-aluno');
 
-  fail(gas.call('getTrainerDashboard', [], aluno), /Only trainers/);
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'Mine' }], aluno), /Only trainers/);
-  fail(gas.call('deleteWorkoutPlan', [push.id], aluno), /Only trainers/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'rest' }] }], aluno), /Only trainers/);
+  fail(gas.call('getTrainerDashboard', [], aluno), /Só o personal/);
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'Mine' }], aluno), /Só o personal/);
+  fail(gas.call('deleteWorkoutPlan', [push.id], aluno), /Só o personal/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'rest' }] }], aluno), /Só o personal/);
 
   // Sessions are always saved for the token's student, whatever the payload says.
   const saved = ok(gas.call('saveWorkoutSession', [{ studentId: 'US-other', workoutId: theirWorkout.id, durationSec: 60, exercises: [] }], aluno)).session;
@@ -267,16 +267,16 @@ test('trainers reach their own and unassigned students, not other trainers\' stu
 
   ok(gas.call('getStudentData', ['US-aluno'], coach));
   ok(gas.call('getStudentData', ['US-free'], coach));
-  fail(gas.call('getStudentData', ['US-theirs'], coach), /do not have access/);
-  fail(gas.call('getStudentStats', ['US-aluno'], coach2), /do not have access/);
-  fail(gas.call('getWorkout', [push.id], coach2), /do not have access/);
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-theirs', name: 'X' }], coach), /do not have access/);
-  fail(gas.call('deleteWorkoutPlan', [push.id], coach2), /do not have access/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'rest' }] }], coach2), /do not have access/);
+  fail(gas.call('getStudentData', ['US-theirs'], coach), /não tem acesso/);
+  fail(gas.call('getStudentStats', ['US-aluno'], coach2), /não tem acesso/);
+  fail(gas.call('getWorkout', [push.id], coach2), /não tem acesso/);
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-theirs', name: 'X' }], coach), /não tem acesso/);
+  fail(gas.call('deleteWorkoutPlan', [push.id], coach2), /não tem acesso/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'rest' }] }], coach2), /não tem acesso/);
   // Moving another trainer's workout to one of your students is refused too.
-  fail(gas.call('saveWorkoutPlan', [{ id: push.id, studentId: 'US-theirs', name: 'Hijack' }], coach2), /do not have access/);
+  fail(gas.call('saveWorkoutPlan', [{ id: push.id, studentId: 'US-theirs', name: 'Hijack' }], coach2), /não tem acesso/);
   fail(gas.call('getStudentData', [], coach), /studentId/);
-  fail(gas.call('saveWorkoutSession', [{ exercises: [] }], coach), /Only students/);
+  fail(gas.call('saveWorkoutSession', [{ exercises: [] }], coach), /Só o aluno/);
   ok(gas.call('getStudentData', [], aluno));
 });
 
@@ -291,23 +291,23 @@ test('getStudentData nests workouts, exercises and a full 7-day schedule', () =>
   assert.equal(data.user.id, 'US-aluno');
   assert.equal(data.user.trainerId, 'US-coach');
   assert.equal(data.workouts.length, 2);
-  assert.equal(push.focus, 'Upper push');
+  assert.equal(push.focus, 'Superiores (empurrar)');
   assert.deepEqual(push.exercises.map((e) => e.order), [1, 2, 3]);
 
   const bench = push.exercises[0];
-  assert.equal(bench.name, 'Barbell Bench Press');
+  assert.equal(bench.name, 'Supino reto com barra');
   assert.strictEqual(bench.sets, 4);
   assert.strictEqual(bench.weight, 80);
   assert.strictEqual(bench.restSec, 120);
   assert.strictEqual(bench.reps, '8');
-  assert.equal(bench.substitute, 'Dumbbell Bench Press');
+  assert.equal(bench.substitute, 'Supino reto com halteres');
   assert.strictEqual(push.exercises[1].reps, '8-10', 'rep ranges survive as text');
   assert.ok(!('videoUrl' in push.exercises[1]), 'blank optional fields are omitted');
 
   const days = data.schedule.days;
   assert.deepEqual(days.map((d) => d.day), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
   assert.deepEqual(days[0], { day: 'Monday', dayNumber: 1, type: 'workout', workoutId: push.id, workoutName: push.name });
-  assert.deepEqual(days[1], { day: 'Tuesday', dayNumber: 2, type: 'cardio', label: '30 min zone 2 bike' });
+  assert.deepEqual(days[1], { day: 'Tuesday', dayNumber: 2, type: 'cardio', label: '30 min de bike (zona 2)' });
   assert.equal(days[2].workoutId, legs.id);
   assert.equal(days[6].type, 'rest');
 
@@ -366,9 +366,9 @@ test('saveWorkoutPlan creates, then updates with cascade and stable exercise IDs
   assert.equal(rows.length, exercisesBefore + 2 - 1);
   assert.equal(gas.sheet('Treinos').records().find((r) => r.ID_Treino === push.id).Nome_do_Treino, 'Push A v2');
 
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', exercises: [] }], coach), /name/);
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'X', exercises: [{ sets: 3 }] }], coach), /exercises\[0\]/);
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-coach', name: 'X' }], coach), /not a student/);
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', exercises: [] }], coach), /nome do treino/);
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'X', exercises: [{ sets: 3 }] }], coach), /exercício 1 está sem nome/);
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-coach', name: 'X' }], coach), /não é aluno/);
 });
 
 test('saveWorkoutSession accepts the frontend SessionRecord and bulk-inserts the sets', () => {
@@ -407,7 +407,7 @@ test('getStudentStats aggregates history into chart-ready series', () => {
   const stats = ok(gas.call('getStudentStats', [], aluno));
   assert.equal(stats.summary.totalSessions, 2);
   assert.deepEqual(stats.history.map((h) => h.date), ['2026-09-08T12:00:00.000Z', '2026-09-15T12:00:00.000Z']);
-  const squat = stats.exerciseProgress.find((e) => e.exerciseName === 'Back Squat');
+  const squat = stats.exerciseProgress.find((e) => e.exerciseName === 'Agachamento livre');
   assert.deepEqual(squat.data.map((d) => d.topWeight), [105, 110]);
   assert.deepEqual(squat.personalRecord, { weight: 110, date: '2026-09-15T12:00:00.000Z' });
   assert.strictEqual(squat.data[0].estimated1RM, 116.7); // 100 * (1 + 5/30), beats 105 * (1 + 3/30)
@@ -429,7 +429,7 @@ test('getTrainerDashboard lists the trainer\'s students with their latest sessio
   assert.deepEqual(data.students.map((s) => s.id), ['US-aluno', 'US-free']);
   const student = data.students[0];
   assert.equal(student.totalSessions, 2);
-  assert.equal(student.lastActivity, 'Trained today');
+  assert.equal(student.lastActivity, 'Treinou hoje');
   assert.equal(student.lastSession.workoutName, legs.name);
   assert.equal(student.lastSession.setCount, 4);
   assert.equal(data.students[1].lastSession, null);
@@ -449,10 +449,10 @@ test('updateSchedule replaces only the days sent and validates workouts', () => 
 
   addUsers(gas, [{ login: 'other', senha: 'secret1', nome: 'Other', role: 'Student', treinador: 'coach' }]);
   const bad = (days) => gas.call('updateSchedule', [{ studentId: 'US-aluno', days }], coach);
-  fail(bad([{ day: 'Funday', type: 'rest' }]), /invalid day/);
-  fail(bad([{ day: 1, type: 'swim' }]), /invalid type/);
-  fail(bad([{ day: 1, type: 'workout', workoutId: 'nope' }]), /not found/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-other', days: [{ day: 1, type: 'workout', workoutId: push.id }] }], coach), /another student/);
+  fail(bad([{ day: 'Funday', type: 'rest' }]), /dia inválido/);
+  fail(bad([{ day: 1, type: 'swim' }]), /tipo inválido/);
+  fail(bad([{ day: 1, type: 'workout', workoutId: 'nope' }]), /não encontrado/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-other', days: [{ day: 1, type: 'workout', workoutId: push.id }] }], coach), /outro aluno/);
 });
 
 test('deleteWorkoutPlan cascades to exercises and agenda but keeps history readable', () => {
@@ -462,8 +462,8 @@ test('deleteWorkoutPlan cascades to exercises and agenda but keeps history reada
   assert.ok(!gas.sheet('Exercicios_Treino').records().some((r) => r.ID_Treino === legs.id));
   assert.equal(ok(gas.call('getStudentData', [], aluno)).schedule.days[2].type, 'rest');
   const stats = ok(gas.call('getStudentStats', [], aluno));
-  assert.deepEqual(stats.exerciseProgress.map((e) => e.exerciseName), ['Back Squat', 'Romanian Deadlift']);
-  fail(gas.call('deleteWorkoutPlan', [legs.id], coach), /not found/);
+  assert.deepEqual(stats.exerciseProgress.map((e) => e.exerciseName), ['Agachamento livre', 'Levantamento terra romeno']);
+  fail(gas.call('deleteWorkoutPlan', [legs.id], coach), /não encontrado/);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -472,10 +472,10 @@ test('deleteWorkoutPlan cascades to exercises and agenda but keeps history reada
 
 test('the protocol is POST { acao, args, token } -> { ok, dados } / { ok: false, erro, codigo }', () => {
   const { gas, coach } = seeded();
-  fail(gas.post({}), /Missing "acao"/);
-  fail(gas.call('dropTables'), /Unknown action "dropTables"/);
-  fail(gas.post('{not json'), /valid JSON/);
-  fail(gas.post('[1,2]'), /JSON object/);
+  fail(gas.post({}), /Falta a "acao"/);
+  fail(gas.call('dropTables'), /Ação desconhecida: "dropTables"/);
+  fail(gas.post('{not json'), /JSON válido/);
+  fail(gas.post('[1,2]'), /objeto JSON/);
   assert.equal(ok(gas.call('ping')).service, 'gym-training-api');
 
   // GET only answers ping, so tokens never end up in URLs.
@@ -485,10 +485,10 @@ test('the protocol is POST { acao, args, token } -> { ok, dados } / { ok: false,
   assert.deepEqual(gas.options(), { ok: true, dados: {} });
 
   // Keys inherited from Object.prototype are not actions, types or IDs.
-  fail(gas.call('toString'), /Unknown action/);
-  fail(gas.call('constructor'), /Unknown action/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'constructor' }] }], coach), /invalid type/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'workout', workoutId: 'constructor' }] }], coach), /not found/);
+  fail(gas.call('toString'), /Ação desconhecida/);
+  fail(gas.call('constructor'), /Ação desconhecida/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'constructor' }] }], coach), /tipo inválido/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'workout', workoutId: 'constructor' }] }], coach), /não encontrado/);
   const odd = ok(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'Odd', exercises: [{ id: 'constructor', name: 'Row' }] }], coach));
   assert.match(odd.workout.exercises[0].id, /^EX-/);
 });

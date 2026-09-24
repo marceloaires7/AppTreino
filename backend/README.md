@@ -6,6 +6,10 @@ Google Spreadsheet, whose tabs are the database. The login and the way the app t
 backend come from the TreinoFácil app (`marceloaires7/TreinoFacil`): hashed passwords, signed
 tokens, and a single `POST { acao, args, token }`.
 
+The app and every message the API returns are in Brazilian Portuguese. Data keys stay in
+English: weekdays (`Monday`…), activity types (`workout`, `cardio`, `rest`) and roles
+(`Trainer`, `Student`). The frontend translates them for display in `Lovable/src/lib/format.ts`.
+
 ```
 Code.gs      the whole backend: paste it into the Apps Script editor
 README.md    this file
@@ -83,7 +87,7 @@ It is answered with one of:
 
 ```json
 { "ok": true, "dados": { } }
-{ "ok": false, "erro": "Your session has expired. Please sign in again", "codigo": "SESSAO_INVALIDA" }
+{ "ok": false, "erro": "Sua sessão expirou. Entre de novo", "codigo": "SESSAO_INVALIDA" }
 ```
 
 - **Only `login` and `ping` work without a token.** Every other action receives the signed-in
@@ -120,8 +124,8 @@ trainer yet, which is the same list the dashboard shows.
 | `deleteWorkoutPlan` | `[workoutId]` | — | their students |
 | `updateSchedule` | `[schedule]` | — | their students |
 
-Anything else is refused with an error such as `Only trainers can do this` or
-`You do not have access to this student`.
+Anything else is refused with an error such as `Só o personal pode fazer isso` or
+`Você não tem acesso a este aluno`.
 
 ## API reference
 
@@ -135,7 +139,7 @@ The objects match the frontend's `Lovable/src/lib/types.ts`.
 ```
 
 The token lasts 30 days. A wrong password and an unknown login get the same answer,
-`Invalid credentials`, and take the same time, so the response does not reveal which logins
+`Usuário ou senha incorretos`, and take the same time, so the response does not reveal which logins
 exist. The response never contains the login, `Salt`, `SenhaHash` or `Senha`.
 
 ### `getStudentData` → `{ user, workouts, schedule }`
@@ -144,14 +148,14 @@ exist. The response never contains the login, `Salt`, `SenhaHash` or `Senha`.
 {
   "user": { "id": "US-aluno", "name": "Aluno Demo", "role": "student", "trainerId": "US-coach", "initials": "AD" },
   "workouts": [{
-    "id": "TR-…", "name": "Push A", "studentId": "US-aluno", "focus": "Upper push",
-    "exercises": [{ "id": "EX-…", "order": 1, "name": "Barbell Bench Press", "sets": 4, "reps": "8",
+    "id": "TR-…", "name": "Treino A - Peito e Ombros", "studentId": "US-aluno", "focus": "Superiores (empurrar)",
+    "exercises": [{ "id": "EX-…", "order": 1, "name": "Supino reto com barra", "sets": 4, "reps": "8",
                     "weight": 80, "restSec": 120, "videoUrl": "…", "notes": "…", "rir": "RIR 2",
-                    "substitute": "Dumbbell Bench Press" }]
+                    "substitute": "Supino reto com halteres" }]
   }],
   "schedule": { "studentId": "US-aluno", "days": [
-    { "day": "Monday", "dayNumber": 1, "type": "workout", "workoutId": "TR-…", "workoutName": "Push A" },
-    { "day": "Tuesday", "dayNumber": 2, "type": "cardio", "label": "30 min zone 2 bike" },
+    { "day": "Monday", "dayNumber": 1, "type": "workout", "workoutId": "TR-…", "workoutName": "Treino A - Peito e Ombros" },
+    { "day": "Tuesday", "dayNumber": 2, "type": "cardio", "label": "30 min de bike (zona 2)" },
     { "day": "Sunday", "dayNumber": 7, "type": "rest" }
   ] }
 }
@@ -172,7 +176,7 @@ The workout has the same shape as in `getStudentData`. It is `null` when no work
 
 ```json
 { "workoutId": "TR-…", "date": "2026-09-22T10:00:00.000Z", "durationSec": 3480,
-  "exercises": [{ "exerciseName": "Back Squat", "sets": [{ "weight": 100, "reps": 5 }] }] }
+  "exercises": [{ "exerciseName": "Agachamento livre", "sets": [{ "weight": 100, "reps": 5 }] }] }
 ```
 
 - The session is saved for the student in the token, whatever `studentId` the record contains.
@@ -190,9 +194,9 @@ The workout has the same shape as in `getStudentData`. It is `null` when no work
 {
   "summary": { "totalSessions": 12, "totalVolume": 84210, "totalDurationSec": 41000,
                "averageDurationSec": 3417, "averageVolume": 7017.5, "lastSessionDate": "…" },
-  "volumeOverTime": [{ "date": "…", "sessionId": "HS-…", "workoutName": "Legs", "totalVolume": 7010, "durationSec": 3600 }],
+  "volumeOverTime": [{ "date": "…", "sessionId": "HS-…", "workoutName": "Treino B - Pernas", "totalVolume": 7010, "durationSec": 3600 }],
   "exerciseProgress": [{
-    "exerciseName": "Back Squat", "exerciseIds": ["EX-…"], "personalRecord": { "weight": 105, "date": "…" },
+    "exerciseName": "Agachamento livre", "exerciseIds": ["EX-…"], "personalRecord": { "weight": 105, "date": "…" },
     "data": [{ "date": "…", "sessionId": "HS-…", "topWeight": 105, "volume": 1315,
                "totalReps": 13, "sets": 3, "estimated1RM": 116.7 }]
   }],
@@ -207,11 +211,11 @@ The workout has the same shape as in `getStudentData`. It is `null` when no work
 
 ```json
 {
-  "trainer": { "id": "US-coach", "name": "…", "role": "trainer", "initials": "CM" },
+  "trainer": { "id": "US-coach", "name": "Alex Moreira", "role": "trainer", "initials": "AM" },
   "students": [{
     "id": "US-aluno", "name": "…", "role": "student", "trainerId": "US-coach", "initials": "AD",
-    "lastActivity": "Trained today", "totalSessions": 12, "daysSinceLastSession": 0,
-    "lastSession": { "id": "HS-…", "date": "…", "workoutId": "TR-…", "workoutName": "Legs",
+    "lastActivity": "Treinou hoje", "totalSessions": 12, "daysSinceLastSession": 0,
+    "lastSession": { "id": "HS-…", "date": "…", "workoutId": "TR-…", "workoutName": "Treino B - Pernas",
                      "durationSec": 3600, "totalVolume": 7010, "exerciseCount": 4, "setCount": 14 }
   }]
 }

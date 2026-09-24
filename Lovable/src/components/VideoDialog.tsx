@@ -15,7 +15,7 @@ export function VideoDialog({ name, url }: { name: string; url?: string | undefi
         variant="ghost"
         size="icon"
         className="size-11 shrink-0 text-primary"
-        aria-label={`Watch ${name} tutorial`}
+        aria-label={`Ver vídeo de ${name}`}
         onClick={() => setOpen(true)}
       >
         <PlayCircle className="size-6" />
@@ -29,7 +29,7 @@ export function VideoDialog({ name, url }: { name: string; url?: string | undefi
             {open ? (
               <iframe
                 src={embed}
-                title={`${name} tutorial`}
+                title={`Vídeo de ${name}`}
                 className="h-full w-full"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
                 allowFullScreen

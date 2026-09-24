@@ -23,18 +23,22 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import type { SessionRecord } from "@/lib/types";
 import { studentTabs } from "./student.index";
 
 export const Route = createFileRoute("/student/stats")({
   head: () => ({
     meta: [
-      { title: "Progress & Stats — IronLog" },
-      { name: "description", content: "Track weight and volume progression for every exercise." },
-      { property: "og:title", content: "Progress & Stats — IronLog" },
+      { title: "Progresso — IronLog" },
+      {
+        name: "description",
+        content: "Acompanhe a evolução de carga e volume de cada exercício.",
+      },
+      { property: "og:title", content: "Progresso — IronLog" },
       {
         property: "og:description",
-        content: "Track weight and volume progression for every exercise.",
+        content: "Acompanhe a evolução de carga e volume de cada exercício.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -59,10 +63,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
         const ex = h.exercises.find((e) => e.exerciseName === current);
         if (!ex) return null;
         return {
-          date: new Date(h.date).toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-          }),
+          date: formatDate(h.date, { month: "short", day: "numeric" }),
           weight: Math.max(...ex.sets.map((s) => s.weight)),
           volume: ex.sets.reduce((v, s) => v + s.weight * s.reps, 0),
         };
@@ -74,7 +75,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          No session history yet.
+          Nenhum treino registrado ainda.
         </CardContent>
       </Card>
     );
@@ -84,7 +85,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
     <div className="space-y-4">
       <Select {...(current ? { value: current } : {})} onValueChange={setSelected}>
         <SelectTrigger className="h-12">
-          <SelectValue placeholder="Select an exercise" />
+          <SelectValue placeholder="Escolha um exercício" />
         </SelectTrigger>
         <SelectContent>
           {exercises.map((name) => (
@@ -98,7 +99,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
       <Tabs value={metric} onValueChange={(v) => setMetric(v as "weight" | "volume")}>
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="weight" className="h-10">
-            Top weight
+            Carga máxima
           </TabsTrigger>
           <TabsTrigger value="volume" className="h-10">
             Volume
@@ -109,7 +110,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
       <Card>
         <CardHeader className="pb-0">
           <CardTitle className="text-sm font-semibold text-muted-foreground">
-            {current} · {metric === "weight" ? "heaviest set (kg)" : "session volume (kg)"}
+            {current} · {metric === "weight" ? "maior carga (kg)" : "volume do treino (kg)"}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
@@ -130,6 +131,7 @@ export function ProgressCharts({ history }: { history: SessionRecord[] }) {
                 <Line
                   type="monotone"
                   dataKey={metric}
+                  name={metric === "weight" ? "Carga máxima (kg)" : "Volume (kg)"}
                   stroke="var(--primary)"
                   strokeWidth={3}
                   dot={{ r: 4, fill: "var(--primary)" }}
@@ -153,8 +155,8 @@ function StatsPage() {
 
   return (
     <AppShell
-      title="Progress"
-      subtitle="Your lifting history"
+      title="Progresso"
+      subtitle="Seu histórico de cargas"
       footer={<TabBar items={studentTabs} />}
     >
       {isPending ? (

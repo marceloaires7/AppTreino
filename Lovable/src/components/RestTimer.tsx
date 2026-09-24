@@ -35,7 +35,7 @@ export function RestTimer({ seconds, onDone }: Props) {
         <Timer className="size-5 text-primary" />
         <div className="flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Rest
+            Descanso
           </p>
           <p className="font-mono text-3xl font-bold leading-none text-primary">
             {mm}:{ss}
@@ -52,7 +52,7 @@ export function RestTimer({ seconds, onDone }: Props) {
           <Plus className="size-4" /> 30s
         </Button>
         <Button className="h-11" onClick={onDone}>
-          <SkipForward className="size-4" /> Skip
+          <SkipForward className="size-4" /> Pular
         </Button>
       </div>
       <Progress value={(1 - left / Math.max(total, 1)) * 100} className="mt-3 h-2" />

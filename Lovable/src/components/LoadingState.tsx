@@ -1,7 +1,7 @@
 import { LoaderCircle } from "lucide-react";
 
 /** Shown while a screen waits for the Apps Script backend, which can take several seconds. */
-export function LoadingState({ label = "Loading…" }: { label?: string }) {
+export function LoadingState({ label = "Carregando…" }: { label?: string }) {
   return (
     <div
       role="status"

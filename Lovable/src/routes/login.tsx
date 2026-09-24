@@ -10,15 +10,15 @@ import { useApp } from "@/context/AppContext";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Sign in — IronLog Training" },
+      { title: "Entrar — IronLog" },
       {
         name: "description",
-        content: "Sign in to IronLog to run your training plan or coach your students.",
+        content: "Entre no IronLog para seguir seu plano de treino ou acompanhar seus alunos.",
       },
-      { property: "og:title", content: "Sign in — IronLog Training" },
+      { property: "og:title", content: "Entrar — IronLog" },
       {
         property: "og:description",
-        content: "Sign in to IronLog to run your training plan or coach your students.",
+        content: "Entre no IronLog para seguir seu plano de treino ou acompanhar seus alunos.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -43,7 +43,7 @@ function LoginPage() {
       const user = await login(loginName.trim(), password);
       router.navigate({ to: user.role === "trainer" ? "/trainer" : "/student" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      setError(err instanceof Error ? err.message : "Não foi possível entrar");
       setLoading(false);
     }
   }
@@ -57,7 +57,7 @@ function LoginPage() {
           </div>
           <h1 className="text-3xl font-black tracking-tight">IRONLOG</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Training built by your coach. Logged by you.
+            Treino montado pelo seu personal. Registrado por você.
           </p>
         </div>
 
@@ -65,12 +65,12 @@ function LoginPage() {
           <CardContent className="pt-6">
             <form className="space-y-4" onSubmit={handleSubmit}>
               <div className="space-y-2">
-                <Label htmlFor="login">Login</Label>
+                <Label htmlFor="login">Usuário</Label>
                 <Input
                   id="login"
                   autoComplete="username"
                   autoCapitalize="none"
-                  placeholder="your login"
+                  placeholder="seu usuário"
                   className="h-12"
                   value={loginName}
                   onChange={(e) => setLoginName(e.target.value)}
@@ -78,7 +78,7 @@ function LoginPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">Senha</Label>
                 <Input
                   id="password"
                   type="password"
@@ -96,7 +96,7 @@ function LoginPage() {
                 </p>
               )}
               <Button type="submit" className="h-12 w-full text-base" disabled={loading}>
-                {loading ? "Signing in…" : "Sign in"}
+                {loading ? "Entrando…" : "Entrar"}
               </Button>
             </form>
           </CardContent>

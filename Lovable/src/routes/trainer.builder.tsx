@@ -18,6 +18,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { plural } from "@/lib/format";
 import type { Exercise, Workout } from "@/lib/types";
 
 export const Route = createFileRoute("/trainer/builder")({
@@ -27,15 +28,15 @@ export const Route = createFileRoute("/trainer/builder")({
   }),
   head: () => ({
     meta: [
-      { title: "Workout Builder — IronLog" },
+      { title: "Montar treino — IronLog" },
       {
         name: "description",
-        content: "Create and edit workouts with sets, reps, cues and videos.",
+        content: "Crie e edite treinos com séries, repetições, observações e vídeos.",
       },
-      { property: "og:title", content: "Workout Builder — IronLog" },
+      { property: "og:title", content: "Montar treino — IronLog" },
       {
         property: "og:description",
-        content: "Create and edit workouts with sets, reps, cues and videos.",
+        content: "Crie e edite treinos com séries, repetições, observações e vídeos.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -87,7 +88,7 @@ function BuilderPage() {
 
   async function save() {
     if (!name.trim() || !studentId) {
-      toast.error("Add a workout name and pick a student");
+      toast.error("Dê um nome ao treino e escolha um aluno");
       return;
     }
     const payload: Workout = {
@@ -97,14 +98,16 @@ function BuilderPage() {
       exercises: exercises.filter((e) => e.name.trim()),
     };
     await api.saveWorkout(payload);
-    toast.success("Workout saved", { description: `${payload.exercises.length} exercises` });
+    toast.success("Treino salvo", {
+      description: plural(payload.exercises.length, "exercício", "exercícios"),
+    });
     router.navigate({ to: "/trainer/student/$id", params: { id: studentId } });
   }
 
   return (
     <AppShell
-      title={workoutId ? "Edit workout" : "New workout"}
-      subtitle="Workout builder"
+      title={workoutId ? "Editar treino" : "Novo treino"}
+      subtitle="Montagem de treino"
       back={
         <Button asChild variant="ghost" size="icon" className="size-11 shrink-0">
           <Link to="/trainer">
@@ -117,20 +120,20 @@ function BuilderPage() {
         <Card>
           <CardContent className="space-y-3 pt-6">
             <div className="space-y-2">
-              <Label htmlFor="wname">Workout name</Label>
+              <Label htmlFor="wname">Nome do treino</Label>
               <Input
                 id="wname"
                 className="h-12"
-                placeholder="Push A — Chest & Shoulders"
+                placeholder="Treino A — Peito e ombros"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label>Assign to student</Label>
+              <Label>Aluno</Label>
               <Select {...(studentId ? { value: studentId } : {})} onValueChange={setStudentId}>
                 <SelectTrigger className="h-12">
-                  <SelectValue placeholder="Select a student" />
+                  <SelectValue placeholder="Escolha um aluno" />
                 </SelectTrigger>
                 <SelectContent>
                   {students?.map((s) => (
@@ -149,12 +152,12 @@ function BuilderPage() {
             <CardContent className="space-y-3 pt-6">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                  Exercise {i + 1}
+                  Exercício {i + 1}
                 </p>
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Remove exercise"
+                  aria-label="Remover exercício"
                   className="size-11 text-destructive"
                   onClick={() => setExercises((p) => p.filter((_, idx) => idx !== i))}
                 >
@@ -163,13 +166,13 @@ function BuilderPage() {
               </div>
               <Input
                 className="h-12"
-                placeholder="Exercise name"
+                placeholder="Nome do exercício"
                 value={ex.name}
                 onChange={(e) => patch(i, { name: e.target.value })}
               />
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Sets</Label>
+                  <Label className="text-xs">Séries</Label>
                   <Input
                     className="h-12"
                     type="number"
@@ -178,7 +181,7 @@ function BuilderPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Reps</Label>
+                  <Label className="text-xs">Repetições</Label>
                   <Input
                     className="h-12"
                     value={ex.reps}
@@ -186,7 +189,7 @@ function BuilderPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Weight (kg)</Label>
+                  <Label className="text-xs">Carga (kg)</Label>
                   <Input
                     className="h-12"
                     type="number"
@@ -195,7 +198,7 @@ function BuilderPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Rest (sec)</Label>
+                  <Label className="text-xs">Descanso (s)</Label>
                   <Input
                     className="h-12"
                     type="number"
@@ -205,7 +208,7 @@ function BuilderPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Video URL (YouTube / Vimeo)</Label>
+                <Label className="text-xs">Link do vídeo (YouTube / Vimeo)</Label>
                 <Input
                   className="h-12"
                   placeholder="https://youtube.com/watch?v=..."
@@ -214,9 +217,9 @@ function BuilderPage() {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Trainer notes / cues</Label>
+                <Label className="text-xs">Observações do personal</Label>
                 <Textarea
-                  placeholder="Keep chest up"
+                  placeholder="Mantenha o peito aberto"
                   value={ex.notes ?? ""}
                   onChange={(e) => patch(i, { notes: e.target.value })}
                 />
@@ -232,10 +235,10 @@ function BuilderPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Substitute</Label>
+                  <Label className="text-xs">Substituto</Label>
                   <Input
                     className="h-12"
-                    placeholder="Optional"
+                    placeholder="Opcional"
                     value={ex.substitute ?? ""}
                     onChange={(e) => patch(i, { substitute: e.target.value })}
                   />
@@ -250,10 +253,10 @@ function BuilderPage() {
           className="h-14 w-full"
           onClick={() => setExercises((p) => [...p, emptyExercise()])}
         >
-          <Plus className="size-5" /> Add exercise
+          <Plus className="size-5" /> Adicionar exercício
         </Button>
         <Button className="h-14 w-full text-base font-bold" onClick={save}>
-          <Save className="size-5" /> Save workout
+          <Save className="size-5" /> Salvar treino
         </Button>
       </div>
     </AppShell>

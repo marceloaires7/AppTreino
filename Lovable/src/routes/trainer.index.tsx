@@ -9,16 +9,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { plural } from "@/lib/format";
 
 export const Route = createFileRoute("/trainer/")({
   head: () => ({
     meta: [
-      { title: "Coach Dashboard — IronLog" },
-      { name: "description", content: "Your student roster, recent activity and workout builder." },
-      { property: "og:title", content: "Coach Dashboard — IronLog" },
+      { title: "Painel do personal — IronLog" },
+      {
+        name: "description",
+        content: "Seus alunos, a atividade recente de cada um e a montagem de treinos.",
+      },
+      { property: "og:title", content: "Painel do personal — IronLog" },
       {
         property: "og:description",
-        content: "Your student roster, recent activity and workout builder.",
+        content: "Seus alunos, a atividade recente de cada um e a montagem de treinos.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -37,19 +41,20 @@ function TrainerDashboard() {
   });
 
   return (
-    <AppShell title="Your students" subtitle={user?.name}>
+    <AppShell title="Seus alunos" subtitle={user?.name}>
       {isPending ? (
         <LoadingState />
       ) : (
         <>
           <Button asChild className="mb-4 h-14 w-full text-base font-bold">
             <Link to="/trainer/builder" search={{ student: undefined, workout: undefined }}>
-              <Plus className="size-5" /> New workout
+              <Plus className="size-5" /> Novo treino
             </Link>
           </Button>
 
           <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-            <Users className="size-4" /> {students?.length ?? 0} active students
+            <Users className="size-4" />{" "}
+            {plural(students?.length ?? 0, "aluno ativo", "alunos ativos")}
           </div>
 
           <div className="space-y-3">
@@ -69,7 +74,7 @@ function TrainerDashboard() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{s.name}</p>
                       <Badge variant="secondary" className="mt-1 text-[11px]">
-                        {s.lastActivity ?? "No activity"}
+                        {s.lastActivity ?? "Sem atividade"}
                       </Badge>
                     </div>
                     <ChevronRight className="size-5 text-muted-foreground" />

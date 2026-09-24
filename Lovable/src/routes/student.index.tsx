@@ -8,17 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { dayLabel, formatDate, formatNumber, plural } from "@/lib/format";
 import { WEEK_DAYS } from "@/lib/types";
 
 export const Route = createFileRoute("/student/")({
   head: () => ({
     meta: [
-      { title: "Today's Plan — IronLog" },
-      { name: "description", content: "Your training for today, ready to start in one tap." },
-      { property: "og:title", content: "Today's Plan — IronLog" },
+      { title: "Treino de hoje — IronLog" },
+      { name: "description", content: "Seu treino de hoje, pronto para começar com um toque." },
+      { property: "og:title", content: "Treino de hoje — IronLog" },
       {
         property: "og:description",
-        content: "Your training for today, ready to start in one tap.",
+        content: "Seu treino de hoje, pronto para começar com um toque.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -28,9 +29,9 @@ export const Route = createFileRoute("/student/")({
 });
 
 export const studentTabs = [
-  { to: "/student" as const, label: "Today", icon: <Home className="size-5" /> },
-  { to: "/student/schedule" as const, label: "Week", icon: <CalendarDays className="size-5" /> },
-  { to: "/student/stats" as const, label: "Stats", icon: <BarChart3 className="size-5" /> },
+  { to: "/student" as const, label: "Hoje", icon: <Home className="size-5" /> },
+  { to: "/student/schedule" as const, label: "Semana", icon: <CalendarDays className="size-5" /> },
+  { to: "/student/stats" as const, label: "Progresso", icon: <BarChart3 className="size-5" /> },
 ];
 
 function StudentHome() {
@@ -60,8 +61,8 @@ function StudentHome() {
 
   return (
     <AppShell
-      title={user ? user.name.split(" ")[0] + "'s day" : "Today"}
-      subtitle={todayName}
+      title={user ? `Olá, ${user.name.split(" ")[0]}` : "Hoje"}
+      subtitle={dayLabel(todayName ?? "")}
       footer={<TabBar items={studentTabs} />}
     >
       {isPending ? (
@@ -71,37 +72,43 @@ function StudentHome() {
           <Card className="border-primary/40 bg-gradient-to-br from-primary/15 to-transparent">
             <CardHeader className="pb-2">
               <Badge variant="secondary" className="w-fit">
-                Today's plan
+                Treino de hoje
               </Badge>
               <CardTitle className="pt-2 text-2xl">
                 {today?.type === "workout" && workout
                   ? workout.name
                   : today?.type === "cardio"
-                    ? (today.label ?? "Cardio session")
-                    : "Rest & recover"}
+                    ? (today.label ?? "Sessão de cardio")
+                    : "Descanso e recuperação"}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {today?.type === "workout" && workout ? (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    {workout.exercises.length} exercises ·{" "}
-                    {workout.exercises.reduce((s, e) => s + e.sets, 0)} total sets
+                    {plural(workout.exercises.length, "exercício", "exercícios")} ·{" "}
+                    {plural(
+                      workout.exercises.reduce((s, e) => s + e.sets, 0),
+                      "série",
+                      "séries",
+                    )}{" "}
+                    no total
                   </p>
                   <Button asChild className="h-16 w-full text-lg font-bold">
                     <Link to="/student/workout/$id" params={{ id: workout.id }}>
-                      <Play className="size-6" /> Start Workout
+                      <Play className="size-6" /> Começar treino
                     </Link>
                   </Button>
                 </>
               ) : today?.type === "cardio" ? (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Flame className="size-4 text-primary" /> Get your session in and log it with your
-                  coach.
+                  <Flame className="size-4 text-primary" /> Faça sua sessão e registre com seu
+                  personal.
                 </p>
               ) : (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Moon className="size-4 text-primary" /> No training today. Sleep, eat, grow.
+                  <Moon className="size-4 text-primary" /> Sem treino hoje. Durma, coma bem e
+                  recupere.
                 </p>
               )}
             </CardContent>
@@ -111,17 +118,17 @@ function StudentHome() {
             <Card>
               <CardContent className="pt-6">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Volume · 7 days
+                  Volume · 7 dias
                 </p>
                 <p className="mt-1 text-2xl font-bold text-primary">
-                  {Math.round(weekVolume).toLocaleString()} kg
+                  {formatNumber(weekVolume)} kg
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-6">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Sessions logged
+                  Treinos registrados
                 </p>
                 <p className="mt-1 text-2xl font-bold text-primary">{data?.history.length ?? 0}</p>
               </CardContent>
@@ -129,7 +136,7 @@ function StudentHome() {
           </div>
 
           <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Recent sessions
+            Treinos recentes
           </h2>
           <div className="space-y-2">
             {recent.map((h) => (
@@ -139,8 +146,7 @@ function StudentHome() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">{h.workoutName}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(h.date).toLocaleDateString()} ·{" "}
-                      {Math.round(h.totalVolume).toLocaleString()} kg
+                      {formatDate(h.date)} · {formatNumber(h.totalVolume)} kg
                     </p>
                   </div>
                 </CardContent>

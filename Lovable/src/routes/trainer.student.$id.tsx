@@ -16,21 +16,22 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
+import { dayLabel, plural } from "@/lib/format";
 import { WEEK_DAYS, type Schedule } from "@/lib/types";
 import { ProgressCharts } from "./student.stats";
 
 export const Route = createFileRoute("/trainer/student/$id")({
   head: () => ({
     meta: [
-      { title: "Student Profile — IronLog" },
+      { title: "Aluno — IronLog" },
       {
         name: "description",
-        content: "Assign workouts, plan the week and review student progress.",
+        content: "Monte os treinos, planeje a semana e acompanhe o progresso do aluno.",
       },
-      { property: "og:title", content: "Student Profile — IronLog" },
+      { property: "og:title", content: "Aluno — IronLog" },
       {
         property: "og:description",
-        content: "Assign workouts, plan the week and review student progress.",
+        content: "Monte os treinos, planeje a semana e acompanhe o progresso do aluno.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -66,18 +67,18 @@ function StudentProfile() {
       };
       if (d !== day) return existing;
       if (value === "rest") return { day: d, type: "rest" as const };
-      if (value === "cardio") return { day: d, type: "cardio" as const, label: "Cardio session" };
+      if (value === "cardio") return { day: d, type: "cardio" as const, label: "Sessão de cardio" };
       return { day: d, type: "workout" as const, workoutId: value };
     });
     const schedule: Schedule = { studentId: id, days };
     await api.saveSchedule(schedule);
     await qc.invalidateQueries({ queryKey: ["trainer-student", id] });
-    toast.success(`${day} updated`);
+    toast.success(`Agenda de ${dayLabel(day).toLowerCase()} atualizada`);
   }
 
   return (
     <AppShell
-      title={data?.student?.name ?? "Student"}
+      title={data?.student?.name ?? "Aluno"}
       subtitle={data?.student?.lastActivity}
       back={
         <Button asChild variant="ghost" size="icon" className="size-11 shrink-0">
@@ -94,20 +95,20 @@ function StudentProfile() {
           <Tabs defaultValue="workouts">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="workouts" className="h-10">
-                Workouts
+                Treinos
               </TabsTrigger>
               <TabsTrigger value="week" className="h-10">
-                Week
+                Semana
               </TabsTrigger>
               <TabsTrigger value="progress" className="h-10">
-                Progress
+                Progresso
               </TabsTrigger>
             </TabsList>
 
             <TabsContent value="workouts" className="mt-4 space-y-3">
               <Button asChild className="h-14 w-full font-bold">
                 <Link to="/trainer/builder" search={{ student: id, workout: undefined }}>
-                  <Plus className="size-5" /> New workout
+                  <Plus className="size-5" /> Novo treino
                 </Link>
               </Button>
               {data?.workouts.map((w) => (
@@ -117,7 +118,8 @@ function StudentProfile() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{w.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {w.exercises.length} exercises · {w.focus ?? "General"}
+                        {plural(w.exercises.length, "exercício", "exercícios")} ·{" "}
+                        {w.focus ?? "Geral"}
                       </p>
                     </div>
                     <Button asChild variant="outline" size="icon" className="size-11 shrink-0">
@@ -138,14 +140,14 @@ function StudentProfile() {
                 return (
                   <div key={day} className="space-y-1">
                     <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      {day}
+                      {dayLabel(day)}
                     </p>
                     <Select value={value} onValueChange={(v) => assign(day, v)}>
                       <SelectTrigger className="h-12">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="rest">Rest day</SelectItem>
+                        <SelectItem value="rest">Descanso</SelectItem>
                         <SelectItem value="cardio">Cardio</SelectItem>
                         {data?.workouts.map((w) => (
                           <SelectItem key={w.id} value={w.id}>

@@ -1,4 +1,4 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useRouter } from "@tanstack/react-router";
 import { Dumbbell } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
@@ -10,15 +10,15 @@ import { useApp } from "@/context/AppContext";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Entrar — IronLog" },
+      { title: "Entrar — AppTreino" },
       {
         name: "description",
-        content: "Entre no IronLog para seguir seu plano de treino ou acompanhar seus alunos.",
+        content: "Entre no AppTreino para seguir seu plano de treino ou acompanhar seus alunos.",
       },
-      { property: "og:title", content: "Entrar — IronLog" },
+      { property: "og:title", content: "Entrar — AppTreino" },
       {
         property: "og:description",
-        content: "Entre no IronLog para seguir seu plano de treino ou acompanhar seus alunos.",
+        content: "Entre no AppTreino para seguir seu plano de treino ou acompanhar seus alunos.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const { login } = useApp();
+  const { login, user, ready } = useApp();
   const router = useRouter();
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -40,12 +40,17 @@ function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const user = await login(loginName.trim(), password);
-      router.navigate({ to: user.role === "trainer" ? "/trainer" : "/student" });
+      const signedIn = await login(loginName.trim(), password);
+      router.navigate({ to: signedIn.role === "trainer" ? "/trainer" : "/student" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível entrar");
       setLoading(false);
     }
+  }
+
+  // Already signed in (e.g. the installed app reopened on this screen): go to the user's home.
+  if (ready && user && !loading) {
+    return <Navigate to={user.role === "trainer" ? "/trainer" : "/student"} replace />;
   }
 
   return (
@@ -55,7 +60,7 @@ function LoginPage() {
           <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[0_0_40px_-8px_var(--primary)]">
             <Dumbbell className="size-8" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight">IRONLOG</h1>
+          <h1 className="text-3xl font-black tracking-tight">AppTreino</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Treino montado pelo seu personal. Registrado por você.
           </p>

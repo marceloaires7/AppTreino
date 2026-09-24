@@ -1,5 +1,5 @@
-import { Link, useRouter } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
+import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { Check, LogOut, Pencil } from "lucide-react";
 import type { ReactNode } from "react";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ export function AppShell({ title, subtitle, back, children, footer }: Props) {
                 <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
               ) : null}
             </div>
+            {user?.role === "student" ? <EditModeButton /> : null}
             {user ? <ChangePasswordDialog /> : null}
             {user ? (
               <Button
@@ -50,6 +51,28 @@ export function AppShell({ title, subtitle, back, children, footer }: Props) {
         {footer}
       </div>
     </div>
+  );
+}
+
+/**
+ * Students switch into edit mode, where they manage their own workouts and week with the same
+ * screens a trainer uses. In edit mode the button turns into a check that leaves it.
+ */
+function EditModeButton() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const editing = pathname.startsWith("/student/edit") || pathname.startsWith("/student/builder");
+  return editing ? (
+    <Button asChild size="icon" aria-label="Sair do modo de edição" className="size-11">
+      <Link to="/student">
+        <Check className="size-5" />
+      </Link>
+    </Button>
+  ) : (
+    <Button asChild variant="ghost" size="icon" aria-label="Modo de edição" className="size-11">
+      <Link to="/student/edit">
+        <Pencil className="size-5" />
+      </Link>
+    </Button>
   );
 }
 

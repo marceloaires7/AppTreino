@@ -20,12 +20,12 @@ import type { SessionRecord } from "@/lib/types";
 export const Route = createFileRoute("/student/workout/$id")({
   head: () => ({
     meta: [
-      { title: "Treino em andamento — IronLog" },
+      { title: "Treino em andamento — AppTreino" },
       {
         name: "description",
         content: "Registre cada série, carga e repetição, com cronômetro de descanso automático.",
       },
-      { property: "og:title", content: "Treino em andamento — IronLog" },
+      { property: "og:title", content: "Treino em andamento — AppTreino" },
       {
         property: "og:description",
         content: "Registre cada série, carga e repetição, com cronômetro de descanso automático.",

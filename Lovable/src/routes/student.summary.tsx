@@ -12,9 +12,9 @@ import { formatNumber, plural } from "@/lib/format";
 export const Route = createFileRoute("/student/summary")({
   head: () => ({
     meta: [
-      { title: "Treino concluído — IronLog" },
+      { title: "Treino concluído — AppTreino" },
       { name: "description", content: "O resumo do seu treino: tempo, volume total e séries." },
-      { property: "og:title", content: "Treino concluído — IronLog" },
+      { property: "og:title", content: "Treino concluído — AppTreino" },
       {
         property: "og:description",
         content: "O resumo do seu treino: tempo, volume total e séries.",

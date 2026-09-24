@@ -15,12 +15,12 @@ import { studentTabs } from "./student.index";
 export const Route = createFileRoute("/student/schedule")({
   head: () => ({
     meta: [
-      { title: "Semana — IronLog" },
+      { title: "Semana — AppTreino" },
       {
         name: "description",
         content: "Seu plano de segunda a domingo, montado pelo seu personal.",
       },
-      { property: "og:title", content: "Semana — IronLog" },
+      { property: "og:title", content: "Semana — AppTreino" },
       {
         property: "og:description",
         content: "Seu plano de segunda a domingo, montado pelo seu personal.",

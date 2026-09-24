@@ -79,13 +79,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "IronLog — Treino de força" },
+      { title: "AppTreino" },
       {
         name: "description",
         content:
           "Treinos montados pelo personal, registro de séries em tempo real e gráficos de evolução.",
       },
-      { property: "og:title", content: "IronLog — Treino de força" },
+      { property: "og:title", content: "AppTreino" },
       {
         property: "og:description",
         content:
@@ -94,13 +94,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
+      // Installed app (see public/manifest.webmanifest): browser colors and iOS standalone mode.
+      { name: "theme-color", content: "#0a0d12" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black" },
+      { name: "apple-mobile-web-app-title", content: "AppTreino" },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.ico`, type: "image/x-icon" },
+      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.ico`, sizes: "48x48" },
+      { rel: "icon", href: `${import.meta.env.BASE_URL}icon.svg`, type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}icons/apple-touch-icon.png` },
+      { rel: "manifest", href: `${import.meta.env.BASE_URL}manifest.webmanifest` },
     ],
   }),
   shellComponent: RootShell,
@@ -125,6 +134,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  // The service worker makes the app installable (public/sw.js). Production builds only, so it
+  // never caches files during development.
+  useEffect(() => {
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
+    }
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

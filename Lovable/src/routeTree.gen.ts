@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as StudentIndexRouteImport } from './routes/student.index'
+import { Route as StudentBuilderRouteImport } from './routes/student.builder'
+import { Route as StudentEditRouteImport } from './routes/student.edit'
 import { Route as StudentScheduleRouteImport } from './routes/student.schedule'
 import { Route as StudentStatsRouteImport } from './routes/student.stats'
 import { Route as StudentSummaryRouteImport } from './routes/student.summary'
@@ -33,6 +35,16 @@ const LoginRoute = LoginRouteImport.update({
 const StudentIndexRoute = StudentIndexRouteImport.update({
   id: '/student/',
   path: '/student/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudentBuilderRoute = StudentBuilderRouteImport.update({
+  id: '/student/builder',
+  path: '/student/builder',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudentEditRoute = StudentEditRouteImport.update({
+  id: '/student/edit',
+  path: '/student/edit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StudentScheduleRoute = StudentScheduleRouteImport.update({
@@ -74,6 +86,8 @@ const TrainerStudentIdRoute = TrainerStudentIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/student/builder': typeof StudentBuilderRoute
+  '/student/edit': typeof StudentEditRoute
   '/student/schedule': typeof StudentScheduleRoute
   '/student/stats': typeof StudentStatsRoute
   '/student/summary': typeof StudentSummaryRoute
@@ -86,6 +100,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/student/builder': typeof StudentBuilderRoute
+  '/student/edit': typeof StudentEditRoute
   '/student/schedule': typeof StudentScheduleRoute
   '/student/stats': typeof StudentStatsRoute
   '/student/summary': typeof StudentSummaryRoute
@@ -99,6 +115,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/student/builder': typeof StudentBuilderRoute
+  '/student/edit': typeof StudentEditRoute
   '/student/schedule': typeof StudentScheduleRoute
   '/student/stats': typeof StudentStatsRoute
   '/student/summary': typeof StudentSummaryRoute
@@ -113,6 +131,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/student/builder'
+    | '/student/edit'
     | '/student/schedule'
     | '/student/stats'
     | '/student/summary'
@@ -125,6 +145,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/student/builder'
+    | '/student/edit'
     | '/student/schedule'
     | '/student/stats'
     | '/student/summary'
@@ -137,6 +159,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/student/builder'
+    | '/student/edit'
     | '/student/schedule'
     | '/student/stats'
     | '/student/summary'
@@ -150,6 +174,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  StudentBuilderRoute: typeof StudentBuilderRoute
+  StudentEditRoute: typeof StudentEditRoute
   StudentScheduleRoute: typeof StudentScheduleRoute
   StudentStatsRoute: typeof StudentStatsRoute
   StudentSummaryRoute: typeof StudentSummaryRoute
@@ -181,6 +207,20 @@ declare module '@tanstack/react-router' {
       path: '/student'
       fullPath: '/student/'
       preLoaderRoute: typeof StudentIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/student/builder': {
+      id: '/student/builder'
+      path: '/student/builder'
+      fullPath: '/student/builder'
+      preLoaderRoute: typeof StudentBuilderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/student/edit': {
+      id: '/student/edit'
+      path: '/student/edit'
+      fullPath: '/student/edit'
+      preLoaderRoute: typeof StudentEditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/student/schedule': {
@@ -238,6 +278,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  StudentBuilderRoute: StudentBuilderRoute,
+  StudentEditRoute: StudentEditRoute,
   StudentScheduleRoute: StudentScheduleRoute,
   StudentStatsRoute: StudentStatsRoute,
   StudentSummaryRoute: StudentSummaryRoute,

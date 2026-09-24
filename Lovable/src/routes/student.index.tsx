@@ -14,9 +14,9 @@ import { WEEK_DAYS } from "@/lib/types";
 export const Route = createFileRoute("/student/")({
   head: () => ({
     meta: [
-      { title: "Treino de hoje — IronLog" },
+      { title: "Treino de hoje — AppTreino" },
       { name: "description", content: "Seu treino de hoje, pronto para começar com um toque." },
-      { property: "og:title", content: "Treino de hoje — IronLog" },
+      { property: "og:title", content: "Treino de hoje — AppTreino" },
       {
         property: "og:description",
         content: "Seu treino de hoje, pronto para começar com um toque.",

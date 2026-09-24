@@ -1,7 +1,7 @@
 /** @OnlyCurrentDoc */
 
 /**
- * Gym Training API: Google Apps Script backend for the IronLog app (frontend on GitHub Pages).
+ * Gym Training API: Google Apps Script backend for the AppTreino app (frontend on GitHub Pages).
  *
  * This is the only file in the Apps Script project. Paste it into Code.gs of the script bound
  * to the spreadsheet (Extensions > Apps Script), then:
@@ -799,7 +799,7 @@ function describeActivity_(daysSince) {
 }
 
 /**
- * POST acao=saveWorkoutPlan, args [workout]  (trainers only, for their own students)
+ * POST acao=saveWorkoutPlan, args [workout]  (trainers for their students; students for themselves)
  * workout is the frontend's Workout:
  * { "id"?: "TR-...", "studentId": "...", "name": "...", "focus"?: "...",
  *   "exercises": [{ "id"?, "name", "sets", "reps", "weight", "restSec", "videoUrl"?, "notes"?, "rir"?, "substitute"? }] }
@@ -809,7 +809,6 @@ function describeActivity_(daysSince) {
  * Data: { workout: Workout, created: boolean }
  */
 function saveWorkoutPlan_(user, workout) {
-  requireRole_(user, 'trainer');
   const input = workout || {};
   const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const name = str_(input.name);
@@ -866,13 +865,12 @@ function saveWorkoutPlan_(user, workout) {
 }
 
 /**
- * POST acao=deleteWorkoutPlan, args [workoutId]  (trainers only)
+ * POST acao=deleteWorkoutPlan, args [workoutId]  (trainers for their students; students for themselves)
  * Deletes the Treinos row, its Exercicios_Treino rows and any Agenda rows pointing to it
  * (those days fall back to rest). Workout history is kept.
  * Data: { workoutId, deletedExercises, clearedScheduleEntries }
  */
 function deleteWorkoutPlan_(user, workoutId) {
-  requireRole_(user, 'trainer');
   const id = str_(workoutId);
   if (!id) throw new ApiError('Falta o parâmetro "workoutId"');
   const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, id));
@@ -889,7 +887,7 @@ function deleteWorkoutPlan_(user, workoutId) {
 }
 
 /**
- * POST acao=updateSchedule, args [schedule]  (trainers only, for their own students)
+ * POST acao=updateSchedule, args [schedule]  (trainers for their students; students for themselves)
  * schedule is the frontend's Schedule:
  * { "studentId": "...", "days": [{ "day": "Monday" | "dayNumber": 1, "type": "workout|cardio|rest",
  *                                  "workoutId"?: "TR-...", "label"?: "30 min bike" }] }
@@ -898,7 +896,6 @@ function deleteWorkoutPlan_(user, workoutId) {
  * Data: { schedule: { studentId, days } }
  */
 function updateSchedule_(user, schedule) {
-  requireRole_(user, 'trainer');
   const input = schedule || {};
   const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const days = input.days;

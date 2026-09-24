@@ -14,12 +14,12 @@ import { plural } from "@/lib/format";
 export const Route = createFileRoute("/trainer/")({
   head: () => ({
     meta: [
-      { title: "Painel do personal — IronLog" },
+      { title: "Painel do personal — AppTreino" },
       {
         name: "description",
         content: "Seus alunos, a atividade recente de cada um e a montagem de treinos.",
       },
-      { property: "og:title", content: "Painel do personal — IronLog" },
+      { property: "og:title", content: "Painel do personal — AppTreino" },
       {
         property: "og:description",
         content: "Seus alunos, a atividade recente de cada um e a montagem de treinos.",

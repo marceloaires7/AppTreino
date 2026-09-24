@@ -1,6 +1,6 @@
 # Gym Training API (Google Apps Script)
 
-Backend for the IronLog app. The frontend (`../Lovable`) is hosted on GitHub Pages. The backend
+Backend for AppTreino. The frontend (`../Lovable`) is hosted on GitHub Pages. The backend
 is a single file, [`Code.gs`](Code.gs): the only file in an Apps Script project bound to a
 Google Spreadsheet, whose tabs are the database. The login and the way the app talks to the
 backend come from the TreinoFácil app (`marceloaires7/TreinoFacil`): hashed passwords, signed
@@ -120,9 +120,13 @@ trainer yet, which is the same list the dashboard shows.
 | `getWorkout` | `[workoutId]` | own workouts | their students' workouts |
 | `saveWorkoutSession` | `[session]` | always saved as self | — |
 | `getTrainerDashboard` | `[]` | — | self |
-| `saveWorkoutPlan` | `[workout]` | — | their students |
-| `deleteWorkoutPlan` | `[workoutId]` | — | their students |
-| `updateSchedule` | `[schedule]` | — | their students |
+| `saveWorkoutPlan` | `[workout]` | own workouts (edit mode) | their students |
+| `deleteWorkoutPlan` | `[workoutId]` | own workouts (edit mode) | their students |
+| `updateSchedule` | `[schedule]` | own week (edit mode) | their students |
+
+In edit mode (the pencil button in the app header) a student uses the same screens as a trainer,
+always on their own workouts and week: a student can omit `studentId`, and cannot edit, delete
+or schedule another student's workouts.
 
 Anything else is refused with an error such as `Só o personal pode fazer isso` or
 `Você não tem acesso a este aluno`.

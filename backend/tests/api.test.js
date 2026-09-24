@@ -234,7 +234,7 @@ test('createUser_ validates accounts and links students to their trainer', () =>
 // Access rules: the user always comes from the token
 // ---------------------------------------------------------------------------------------------
 
-test('students only reach their own data and cannot use trainer actions', () => {
+test('students only reach their own data', () => {
   const { gas, aluno, coach, push } = seeded();
   addUsers(gas, [{ login: 'other', senha: 'secret1', nome: 'Other', role: 'Student', treinador: 'coach' }]);
   const theirWorkout = ok(gas.call('saveWorkoutPlan', [{ studentId: 'US-other', name: 'Theirs', exercises: [] }], coach)).workout;
@@ -246,14 +246,41 @@ test('students only reach their own data and cannot use trainer actions', () => 
   assert.equal(ok(gas.call('getStudentData', ['US-aluno'], aluno)).user.id, 'US-aluno');
 
   fail(gas.call('getTrainerDashboard', [], aluno), /Só o personal/);
-  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'Mine' }], aluno), /Só o personal/);
-  fail(gas.call('deleteWorkoutPlan', [push.id], aluno), /Só o personal/);
-  fail(gas.call('updateSchedule', [{ studentId: 'US-aluno', days: [{ day: 1, type: 'rest' }] }], aluno), /Só o personal/);
 
   // Sessions are always saved for the token's student, whatever the payload says.
   const saved = ok(gas.call('saveWorkoutSession', [{ studentId: 'US-other', workoutId: theirWorkout.id, durationSec: 60, exercises: [] }], aluno)).session;
   assert.equal(saved.studentId, 'US-aluno');
   assert.equal(saved.workoutId, undefined, "another student's workout is not linked");
+});
+
+test('students edit their own workouts and week (edit mode), never someone else\'s', () => {
+  const { gas, aluno, coach, push, legs } = seeded();
+  addUsers(gas, [{ login: 'other', senha: 'secret1', nome: 'Other', role: 'Student', treinador: 'coach' }]);
+  const theirWorkout = ok(gas.call('saveWorkoutPlan', [{ studentId: 'US-other', name: 'Theirs', exercises: [] }], coach)).workout;
+
+  // Create (studentId may be omitted: a student always works on themselves) and edit.
+  const mine = ok(gas.call('saveWorkoutPlan', [{ name: 'Meu treino', exercises: [{ name: 'Remada curvada', sets: 3, reps: '10', weight: 40, restSec: 90 }] }], aluno));
+  assert.equal(mine.created, true);
+  assert.equal(mine.workout.studentId, 'US-aluno');
+  const edited = ok(gas.call('saveWorkoutPlan', [{ ...push, name: 'Treino A editado' }], aluno)).workout;
+  assert.equal(edited.id, push.id);
+  assert.equal(edited.exercises[0].id, push.exercises[0].id, 'exercise IDs kept, history stays linked');
+
+  // Week: own workouts only.
+  const week = ok(gas.call('updateSchedule', [{ days: [{ day: 'Thursday', type: 'workout', workoutId: mine.workout.id }] }], aluno)).schedule;
+  assert.equal(week.days[3].workoutId, mine.workout.id);
+  fail(gas.call('updateSchedule', [{ days: [{ day: 1, type: 'workout', workoutId: theirWorkout.id }] }], aluno), /outro aluno/);
+
+  // Delete own workout; the trainer sees the student's changes.
+  assert.equal(ok(gas.call('deleteWorkoutPlan', [legs.id], aluno)).deletedExercises, 2);
+  assert.deepEqual(ok(gas.call('getStudentData', ['US-aluno'], coach)).workouts.map((w) => w.name).sort(), ['Meu treino', 'Treino A editado']);
+
+  // Nothing of another student.
+  fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-other', name: 'X' }], aluno), /não tem acesso/);
+  fail(gas.call('saveWorkoutPlan', [{ id: theirWorkout.id, name: 'Hijack' }], aluno), /não tem acesso/);
+  fail(gas.call('deleteWorkoutPlan', [theirWorkout.id], aluno), /não tem acesso/);
+  fail(gas.call('updateSchedule', [{ studentId: 'US-other', days: [{ day: 1, type: 'rest' }] }], aluno), /não tem acesso/);
+  assert.equal(ok(gas.call('getStudentData', ['US-other'], coach)).workouts.length, 1);
 });
 
 test('trainers reach their own and unassigned students, not other trainers\' students', () => {

@@ -30,12 +30,12 @@ import { studentTabs } from "./student.index";
 export const Route = createFileRoute("/student/stats")({
   head: () => ({
     meta: [
-      { title: "Progresso — IronLog" },
+      { title: "Progresso — AppTreino" },
       {
         name: "description",
         content: "Acompanhe a evolução de carga e volume de cada exercício.",
       },
-      { property: "og:title", content: "Progresso — IronLog" },
+      { property: "og:title", content: "Progresso — AppTreino" },
       {
         property: "og:description",
         content: "Acompanhe a evolução de carga e volume de cada exercício.",

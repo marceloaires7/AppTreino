@@ -28,7 +28,10 @@ export const Route = createFileRoute("/trainer/builder")({
   head: () => ({
     meta: [
       { title: "Workout Builder — IronLog" },
-      { name: "description", content: "Create and edit workouts with sets, reps, cues and videos." },
+      {
+        name: "description",
+        content: "Create and edit workouts with sets, reps, cues and videos.",
+      },
       { property: "og:title", content: "Workout Builder — IronLog" },
       {
         property: "og:description",
@@ -62,7 +65,7 @@ function BuilderPage() {
   const { data: students } = useQuery({
     queryKey: ["students", trainer?.id],
     enabled: !!trainer,
-    queryFn: () => (trainer ? api.getStudents(trainer.id) : Promise.resolve([])),
+    queryFn: () => (trainer ? api.getStudents() : Promise.resolve([])),
   });
 
   const [studentId, setStudentId] = useState(student ?? "");
@@ -125,10 +128,7 @@ function BuilderPage() {
             </div>
             <div className="space-y-2">
               <Label>Assign to student</Label>
-              <Select
-                {...(studentId ? { value: studentId } : {})}
-                onValueChange={setStudentId}
-              >
+              <Select {...(studentId ? { value: studentId } : {})} onValueChange={setStudentId}>
                 <SelectTrigger className="h-12">
                   <SelectValue placeholder="Select a student" />
                 </SelectTrigger>

@@ -5,14 +5,22 @@
  *
  * This is the only file in the Apps Script project. Paste it into Code.gs of the script bound
  * to the spreadsheet (Extensions > Apps Script), then:
- *   1. Run setupDatabase() once from the editor to create the tabs and headers. Optionally run
- *      seedDemoData() for a demo trainer (coach / coach123) and student (aluno / aluno123).
+ *   1. Create the accounts: edit the list in cadastrarUsuarios() and run it from the editor, or
+ *      run seedDemoData() for a demo trainer (coach / coach123) and student (aluno / aluno123).
+ *      Tabs and columns are created on first use; setupDatabase() also formats them.
  *   2. Deploy > New deployment > Web app, Execute as: Me, Who has access: Anyone.
  *   3. Put the /exec URL in the frontend. After editing this file, publish a new version in
  *      Deploy > Manage deployments, or the URL keeps serving the old code.
  *
- * Routing uses an `action` parameter: query string for GET, query string or JSON body for POST.
- * Every response is JSON: { status: "success", data } or { status: "error", message }.
+ * Protocol (the one from the TreinoFácil app): the frontend POSTs { acao, args, token } as
+ * text/plain and gets { ok: true, dados } or { ok: false, erro, codigo? }. Only "login" and
+ * "ping" work without a token. Every other action receives the signed-in user, taken from the
+ * token, as its first argument: the client never says who it is.
+ *
+ * Passwords are never stored. Usuarios keeps a per-account Salt and
+ * SenhaHash = HMAC(pepper, salt|senha) repeated 300 times; the pepper lives in the script
+ * properties, outside the spreadsheet. A token is "payload.signature", signed with another
+ * script-property secret, and lasts 30 days. Five wrong passwords lock a login for 15 minutes.
  * The full API reference is in backend/README.md in the app repository.
  */
 
@@ -20,7 +28,15 @@
 // CONFIGURATION: sheet schema and constants
 // ===============================================================================================
 
-const API_VERSION = '1.0.0';
+const API_VERSION = '2.0.0';
+
+const SESSION_DAYS = 30;
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_SECONDS = 15 * 60;
+const HASH_ITERATIONS = 300;
+const MIN_PASSWORD_LENGTH = 6;
+// Error code the frontend reacts to by signing the user out.
+const SESSION_INVALID = 'SESSAO_INVALIDA';
 
 const SHEET = {
   USERS: 'Usuarios',
@@ -32,20 +48,18 @@ const SHEET = {
 };
 
 /**
- * `columns` must exist in row 1 of the tab. `optional` columns are used when present
- * (setupDatabase() creates them) and ignored otherwise. Columns not listed in `numeric` are
- * written as plain text, so values like "8-12" reps or a "0123" password are not turned into
- * dates or numbers by Sheets.
+ * Columns each tab must have. Missing tabs and columns are added automatically on first use.
+ * Columns not listed in `numeric` are written as plain text, so values like "8-12" reps or a
+ * login such as "0123" are not turned into dates or numbers by Sheets.
+ * Usuarios may also have a legacy plain-text Senha column; see passwordMatches_().
  */
 const SCHEMA = {
   [SHEET.USERS]: {
-    columns: ['ID_Usuario', 'Nome', 'Login', 'Senha', 'Role'],
-    optional: ['ID_Treinador'],
+    columns: ['ID_Usuario', 'Nome', 'Login', 'Role', 'ID_Treinador', 'Salt', 'SenhaHash', 'CriadoEm'],
     numeric: [],
   },
   [SHEET.WORKOUTS]: {
     columns: ['ID_Treino', 'ID_Usuario', 'Nome_do_Treino', 'Descricao'],
-    optional: [],
     numeric: [],
   },
   [SHEET.EXERCISES]: {
@@ -53,22 +67,18 @@ const SCHEMA = {
       'ID_Exercicio', 'ID_Treino', 'Ordem', 'Nome', 'Series', 'Reps', 'Carga_kg', 'Descanso_seg',
       'Link_Video', 'Anotacoes', 'RIR_RPE', 'Exercicio_Substituto',
     ],
-    optional: [],
     numeric: ['Ordem', 'Series', 'Carga_kg', 'Descanso_seg'],
   },
   [SHEET.SCHEDULE]: {
-    columns: ['ID_Agenda', 'ID_Usuario', 'Dia_Semana', 'Tipo_Atividade', 'ID_Treino'],
-    optional: ['Descricao'],
+    columns: ['ID_Agenda', 'ID_Usuario', 'Dia_Semana', 'Tipo_Atividade', 'ID_Treino', 'Descricao'],
     numeric: ['Dia_Semana'],
   },
   [SHEET.SESSIONS]: {
-    columns: ['ID_Historico', 'ID_Usuario', 'Data', 'Tempo_Duracao_seg', 'Volume_Total'],
-    optional: ['ID_Treino'],
+    columns: ['ID_Historico', 'ID_Usuario', 'Data', 'Tempo_Duracao_seg', 'Volume_Total', 'ID_Treino'],
     numeric: ['Tempo_Duracao_seg', 'Volume_Total'],
   },
   [SHEET.SETS]: {
-    columns: ['ID_Historico', 'ID_Exercicio', 'Serie_Num', 'Reps_Feitas', 'Carga_Usada'],
-    optional: ['Nome_Exercicio'],
+    columns: ['ID_Historico', 'ID_Exercicio', 'Serie_Num', 'Reps_Feitas', 'Carga_Usada', 'Nome_Exercicio'],
     numeric: ['Serie_Num', 'Reps_Feitas', 'Carga_Usada'],
   },
 };
@@ -83,37 +93,48 @@ const ACTIVITY_TO_SHEET = { workout: 'Workout', cardio: 'Cardio', rest: 'Rest' }
 // ENTRY POINTS AND ROUTING
 // ===============================================================================================
 
-/** An error whose message is safe to return to the client. */
+/** An error whose message is safe to return to the client, with an optional machine code. */
 class ApiError extends Error {
-  constructor(message) {
+  constructor(message, code) {
     super(message);
     this.name = 'ApiError';
+    this.code = code || '';
   }
 }
 
-const GET_ROUTES = {
-  ping: () => ({ service: 'gym-training-api', version: API_VERSION, time: new Date().toISOString() }),
-  getStudentData: (params) => getStudentData_(params.userId),
-  getWorkout: (params) => getWorkout_(params.workoutId),
-  getStudentStats: (params) => getStudentStats_(params.userId),
-  getTrainerDashboard: (params) => getTrainerDashboard_(params.trainerId),
-};
-
-// `write: true` routes run under a script lock so concurrent saves cannot interleave.
-const POST_ROUTES = {
-  login: { write: false, run: login_ },
+/**
+ * Everything callable from outside. `public` actions need no token; the others get the signed-in
+ * user as their first argument. `write` actions run under the script lock.
+ */
+const ACTIONS = {
+  ping: { public: true, run: ping_ },
+  login: { public: true, run: login_ },
+  changePassword: { write: true, run: changePassword_ },
+  getStudentData: { run: getStudentData_ },
+  getWorkout: { run: getWorkout_ },
+  getStudentStats: { run: getStudentStats_ },
+  getTrainerDashboard: { run: getTrainerDashboard_ },
   saveWorkoutSession: { write: true, run: saveWorkoutSession_ },
   saveWorkoutPlan: { write: true, run: saveWorkoutPlan_ },
   deleteWorkoutPlan: { write: true, run: deleteWorkoutPlan_ },
   updateSchedule: { write: true, run: updateSchedule_ },
 };
 
-function doGet(e) {
-  return handleRequest_('GET', e);
+/** The app calls everything by POST, with the body { acao, args, token } sent as text/plain. */
+function doPost(e) {
+  return respond_(() => {
+    const body = parseBody_(e);
+    return execute_(body.acao, body.args, body.token);
+  });
 }
 
-function doPost(e) {
-  return handleRequest_('POST', e);
+/** GET only answers "ping", to check a deployment from the browser. Tokens never go in URLs. */
+function doGet(e) {
+  return respond_(() => {
+    const action = str_(e && e.parameter && e.parameter.acao) || 'ping';
+    if (action !== 'ping') throw new ApiError('Use POST with { acao, args, token }');
+    return execute_('ping', [], '');
+  });
 }
 
 /**
@@ -122,30 +143,37 @@ function doPost(e) {
  * the platform ever starts forwarding them.
  */
 function doOptions() {
-  return jsonResponse_({ status: 'success', data: {} });
+  return jsonResponse_({ ok: true, dados: {} });
 }
 
-function handleRequest_(method, e) {
+/** Runs an allowed action; every action but the public ones needs a valid token. */
+function execute_(action, args, token) {
   resetTableCache_();
+  action = str_(action);
+  args = Array.isArray(args) ? args : [];
+  if (!action) throw new ApiError('Missing "acao"');
+  if (!hasOwn_(ACTIONS, action)) throw new ApiError(`Unknown action "${action}"`);
+
+  const def = ACTIONS[action];
+  const run = () => (def.public ? def.run.apply(null, args) : def.run.apply(null, [validateToken_(token)].concat(args)));
+  return def.write ? withLock_(run) : run();
+}
+
+/** Wraps a result as { ok: true, dados } or an error as { ok: false, erro, codigo? }. */
+function respond_(fn) {
+  let payload;
   try {
-    const params = (e && e.parameter) || {};
-    const body = method === 'POST' ? parseBody_(e) : {};
-    const action = str_(params.action || body.action);
-    let data;
-    if (method === 'GET') {
-      if (!hasOwn_(GET_ROUTES, action)) throw new ApiError(unknownActionMessage_(method, action));
-      data = GET_ROUTES[action](params);
-    } else {
-      const route = hasOwn_(POST_ROUTES, action) ? POST_ROUTES[action] : null;
-      if (!route) throw new ApiError(unknownActionMessage_(method, action));
-      data = route.write ? withLock_(() => route.run(body)) : route.run(body);
-    }
-    return jsonResponse_({ status: 'success', data: data });
+    payload = { ok: true, dados: fn() };
   } catch (err) {
-    if (err instanceof ApiError) return jsonResponse_({ status: 'error', message: err.message });
-    console.error(err && err.stack ? err.stack : err);
-    return jsonResponse_({ status: 'error', message: 'Internal error: ' + (err && err.message ? err.message : err) });
+    if (err instanceof ApiError) {
+      payload = { ok: false, erro: err.message };
+      if (err.code) payload.codigo = err.code;
+    } else {
+      console.error(err && err.stack ? err.stack : err);
+      payload = { ok: false, erro: 'Internal error: ' + (err && err.message ? err.message : err) };
+    }
   }
+  return jsonResponse_(payload);
 }
 
 function parseBody_(e) {
@@ -162,23 +190,22 @@ function parseBody_(e) {
   return body;
 }
 
-function unknownActionMessage_(method, action) {
-  if (!action) return 'Missing "action" parameter';
-  const other = method === 'GET' ? POST_ROUTES : GET_ROUTES;
-  if (hasOwn_(other, action)) return `Action "${action}" must be called with ${method === 'GET' ? 'POST' : 'GET'}`;
-  const available = Object.keys(method === 'GET' ? GET_ROUTES : POST_ROUTES).join(', ');
-  return `Unknown ${method} action "${action}". Available: ${available}`;
-}
+// The script lock is not reentrant, so nested calls (a write that creates a missing column, a
+// login that upgrades a legacy password) reuse the lock this execution already holds.
+let lockDepth_ = 0;
 
 function withLock_(fn) {
+  if (lockDepth_ > 0) return fn();
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw new ApiError('Server is busy, please try again');
+  lockDepth_++;
   try {
     const result = fn();
     // Commit pending writes before the next request waiting on the lock reads the sheets.
     SpreadsheetApp.flush();
     return result;
   } finally {
+    lockDepth_--;
     lock.releaseLock();
   }
 }
@@ -187,36 +214,263 @@ function jsonResponse_(payload) {
   return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
 }
 
+function ping_() {
+  return { service: 'gym-training-api', version: API_VERSION, time: new Date().toISOString() };
+}
+
 // ===============================================================================================
-// AUTH
+// AUTH: passwords, tokens and access rules
 // ===============================================================================================
+
+/** A secret generated on first use and kept in the script properties, outside the spreadsheet. */
+function secret_(key) {
+  const props = PropertiesService.getScriptProperties();
+  return (
+    props.getProperty(key) ||
+    withLock_(() => {
+      // Re-check under the lock so two first requests cannot create different secrets.
+      let value = props.getProperty(key);
+      if (!value) {
+        value = Utilities.getUuid() + Utilities.getUuid();
+        props.setProperty(key, value);
+      }
+      return value;
+    })
+  );
+}
+
+/** Apps Script bytes (-128..127) -> hex text. */
+function bytesToHex_(bytes) {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const b = (bytes[i] + 256) % 256;
+    hex += (b < 16 ? '0' : '') + b.toString(16);
+  }
+  return hex;
+}
+
+function hmac_(text, key) {
+  return bytesToHex_(Utilities.computeHmacSha256Signature(text, key, Utilities.Charset.UTF_8));
+}
+
+function hashPassword_(password, salt) {
+  const pepper = secret_('PEPPER_SENHA');
+  let hash = hmac_(salt + '|' + password, pepper);
+  for (let i = 0; i < HASH_ITERATIONS; i++) hash = hmac_(hash + '|' + salt, pepper);
+  return hash;
+}
+
+/** Compares without stopping at the first different character, so timing leaks nothing. */
+function safeEqual_(a, b) {
+  a = String(a);
+  b = String(b);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function sessionError_() {
+  return new ApiError('Your session has expired. Please sign in again', SESSION_INVALID);
+}
+
+function createToken_(userId) {
+  const expiresAt = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
+  const payload = Utilities.base64EncodeWebSafe(userId + '|' + expiresAt);
+  return { token: payload + '.' + hmac_(payload, secret_('SEGREDO_TOKEN')), expiresAt: expiresAt };
+}
+
+/** Returns the user who owns the token, or throws SESSAO_INVALIDA. */
+function validateToken_(token) {
+  const parts = str_(token).split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) throw sessionError_();
+  if (!safeEqual_(hmac_(parts[0], secret_('SEGREDO_TOKEN')), parts[1])) throw sessionError_();
+
+  let payload;
+  try {
+    payload = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString();
+  } catch (err) {
+    throw sessionError_();
+  }
+  const sep = payload.lastIndexOf('|');
+  const userId = payload.slice(0, sep);
+  const expiresAt = Number(payload.slice(sep + 1));
+  if (sep < 1 || !(expiresAt > Date.now())) throw sessionError_();
+
+  const row = findUserById_(userId);
+  if (!row) throw sessionError_(); // account deleted after signing in
+  const user = toUser_(row);
+  if (!user.role) throw sessionError_();
+  return user;
+}
+
+function normalizeLogin_(value) {
+  return str_(value).toLowerCase();
+}
+
+function findUserByLogin_(login) {
+  const wanted = normalizeLogin_(login);
+  return readTable_(SHEET.USERS).rows.find((r) => normalizeLogin_(r.Login) === wanted) || null;
+}
+
+function findUserById_(id) {
+  return readTable_(SHEET.USERS).rows.find((r) => sameId_(r.ID_Usuario, id)) || null;
+}
 
 /**
- * POST action=login
- * Body: { "Login": "...", "Senha": "..." }   (also accepts login / password)
- * Data: { user: { id, name, role, trainerId?, initials }, role }
+ * POST acao=login, args [login, senha]  (public)
+ * Data: { token, expiresAt, user: { id, name, role, trainerId?, initials } }
+ * The same message answers an unknown login and a wrong password, and both take as long.
  */
-function login_(body) {
-  const login = str_(body.Login !== undefined ? body.Login : body.login).toLowerCase();
-  const password = str_(body.Senha !== undefined ? body.Senha : body.password);
-  if (!login || !password) throw new ApiError('Login and Senha are required');
+function login_(login, password) {
+  login = normalizeLogin_(login);
+  password = password == null ? '' : String(password);
+  if (!login || !password) throw new ApiError('Enter your login and password');
 
-  const row = readTable_(SHEET.USERS).rows.find((r) => str_(r.Login).toLowerCase() === login);
-  if (!row || str_(row.Senha) !== password) throw new ApiError('Invalid credentials');
+  const cache = CacheService.getScriptCache();
+  const failuresKey = 'login-failures:' + login;
+  const failures = Number(cache.get(failuresKey) || 0);
+  if (failures >= MAX_LOGIN_ATTEMPTS) throw new ApiError('Too many attempts. Wait 15 minutes and try again');
+
+  const row = findUserByLogin_(login);
+  let matches = false;
+  if (row) matches = passwordMatches_(row, password);
+  else hashPassword_(password, 'no-such-account');
+
+  if (!matches) {
+    cache.put(failuresKey, String(failures + 1), LOCKOUT_SECONDS);
+    throw new ApiError('Invalid credentials');
+  }
+  cache.remove(failuresKey);
 
   const user = toUser_(row);
   if (!user.role) throw new ApiError('This account has no valid Role (expected Trainer or Student)');
-  return { user: user, role: user.role };
+  const session = createToken_(user.id);
+  return { token: session.token, expiresAt: session.expiresAt, user: user };
+}
+
+/**
+ * Checks a password against the account's Salt + SenhaHash. Accounts from before hashing still
+ * have a plain-text Senha: it is accepted once and immediately replaced by Salt + SenhaHash.
+ */
+function passwordMatches_(row, password) {
+  const hash = str_(row.SenhaHash);
+  if (hash) return safeEqual_(hashPassword_(password, str_(row.Salt)), hash);
+
+  const legacy = str_(row.Senha);
+  if (!legacy || !safeEqual_(legacy, str_(password))) {
+    hashPassword_(password, 'no-such-account'); // same timing as a real check
+    return false;
+  }
+  setPassword_(str_(row.ID_Usuario), str_(password));
+  return true;
+}
+
+/** Stores a new Salt + SenhaHash for the account and blanks any legacy plain-text Senha. */
+function setPassword_(userId, password) {
+  withLock_(() => {
+    delete tableCache_[SHEET.USERS];
+    const row = findUserById_(userId);
+    if (!row) throw new ApiError(`User "${userId}" not found`);
+    const salt = Utilities.getUuid();
+    updateRecord_(SHEET.USERS, row, { Salt: salt, SenhaHash: hashPassword_(password, salt), Senha: '' });
+  });
+}
+
+/**
+ * POST acao=changePassword, args [senhaAtual, senhaNova]
+ * Data: { changed: true }
+ */
+function changePassword_(user, currentPassword, newPassword) {
+  const next = newPassword == null ? '' : String(newPassword);
+  if (next.length < MIN_PASSWORD_LENGTH) {
+    throw new ApiError(`The new password must have at least ${MIN_PASSWORD_LENGTH} characters`);
+  }
+  const row = findUserById_(user.id);
+  if (!row || !passwordMatches_(row, currentPassword == null ? '' : String(currentPassword))) {
+    throw new ApiError('The current password is incorrect');
+  }
+  setPassword_(user.id, next);
+  return { changed: true };
+}
+
+/**
+ * Creates an account from { login, senha, nome, role, treinador? } (treinador = the trainer's
+ * login). Only reachable from the editor functions below: the app has no sign-up, because the
+ * API URL is public and anyone who found it could fill the spreadsheet with accounts.
+ */
+function createUser_(account) {
+  const login = normalizeLogin_(account.login);
+  const password = account.senha == null ? '' : String(account.senha);
+  const name = str_(account.nome) || login;
+  const role = normalizeRole_(account.role);
+  if (!/^[a-z0-9._-]{3,30}$/.test(login)) {
+    throw new ApiError(`Login "${login}" must have 3-30 characters: lowercase letters, numbers, dot, dash or underscore`);
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw new ApiError(`The password for "${login}" must have at least ${MIN_PASSWORD_LENGTH} characters`);
+  }
+  if (!role) throw new ApiError(`The role for "${login}" must be Trainer or Student`);
+
+  return withLock_(() => {
+    delete tableCache_[SHEET.USERS];
+    if (findUserByLogin_(login)) throw new ApiError(`Login "${login}" already exists`);
+    let trainerId = '';
+    if (str_(account.treinador)) {
+      const trainer = findUserByLogin_(account.treinador);
+      if (!trainer || normalizeRole_(trainer.Role) !== 'trainer') {
+        throw new ApiError(`Trainer "${account.treinador}" not found`);
+      }
+      trainerId = str_(trainer.ID_Usuario);
+    }
+    let id = `US-${login}`;
+    if (findUserById_(id)) id = generateId_('US');
+    const salt = Utilities.getUuid();
+    const record = {
+      ID_Usuario: id,
+      Nome: name,
+      Login: login,
+      Role: role === 'trainer' ? 'Trainer' : 'Student',
+      ID_Treinador: trainerId,
+      Salt: salt,
+      SenhaHash: hashPassword_(password, salt),
+      CriadoEm: new Date().toISOString(),
+    };
+    appendRecords_(SHEET.USERS, [record]);
+    return toUser_(record);
+  });
 }
 
 /** Loads a user by ID and checks its role. `paramName` is only used in error messages. */
 function requireUser_(id, role, paramName) {
   if (!str_(id)) throw new ApiError(`Missing required parameter "${paramName}"`);
-  const row = readTable_(SHEET.USERS).rows.find((r) => sameId_(r.ID_Usuario, id));
+  const row = findUserById_(id);
   if (!row) throw new ApiError(`User "${id}" not found`);
   const user = toUser_(row);
   if (role && user.role !== role) throw new ApiError(`User "${id}" is not a ${role}`);
   return user;
+}
+
+function requireRole_(user, role) {
+  if (user.role !== role) throw new ApiError(role === 'trainer' ? 'Only trainers can do this' : 'Only students can do this');
+}
+
+/**
+ * The student a request is about. Students only ever get themselves; trainers get a student
+ * assigned to them, or one with no trainer yet (the same students their dashboard lists).
+ */
+function accessibleStudent_(user, studentId) {
+  if (user.role === 'student') {
+    if (str_(studentId) && !sameId_(studentId, user.id)) throw noAccessError_();
+    return user;
+  }
+  const student = requireUser_(studentId, 'student', 'studentId');
+  if (student.trainerId && student.trainerId !== user.id) throw noAccessError_();
+  return student;
+}
+
+function noAccessError_() {
+  return new ApiError('You do not have access to this student');
 }
 
 // ===============================================================================================
@@ -224,11 +478,11 @@ function requireUser_(id, role, paramName) {
 // ===============================================================================================
 
 /**
- * GET action=getStudentData&userId={id}
+ * POST acao=getStudentData, args [studentId]  (students may omit it: they always get themselves)
  * Data: { user, workouts: Workout[] (exercises nested, sorted by Ordem), schedule: { studentId, days } }
  */
-function getStudentData_(userId) {
-  const student = requireUser_(userId, 'student', 'userId');
+function getStudentData_(user, studentId) {
+  const student = accessibleStudent_(user, studentId);
   return {
     user: student,
     workouts: listWorkouts_(student.id),
@@ -237,13 +491,14 @@ function getStudentData_(userId) {
 }
 
 /**
- * GET action=getWorkout&workoutId={id}
+ * POST acao=getWorkout, args [workoutId]
  * Data: { workout: Workout | null }   (null when no workout has that ID)
  */
-function getWorkout_(workoutId) {
+function getWorkout_(user, workoutId) {
   if (!str_(workoutId)) throw new ApiError('Missing required parameter "workoutId"');
   const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, workoutId));
   if (!row) return { workout: null };
+  accessibleStudent_(user, str_(row.ID_Usuario));
   const exercises = readTable_(SHEET.EXERCISES).rows.filter((r) => sameId_(r.ID_Treino, workoutId));
   return { workout: toWorkout_(row, exercises) };
 }
@@ -277,25 +532,27 @@ function buildSchedule_(studentId) {
 }
 
 /**
- * POST action=saveWorkoutSession
- * Body (the frontend's SessionRecord, optionally wrapped in "session"):
+ * POST acao=saveWorkoutSession, args [session]  (students only; saved for the signed-in student)
+ * session is the frontend's SessionRecord:
  * {
- *   "studentId": "...", "workoutId": "...", "date": "ISO (optional, defaults to now)",
- *   "durationSec": 3600,
+ *   "workoutId": "...", "date": "ISO (optional, defaults to now)", "durationSec": 3600,
  *   "exercises": [{ "exerciseId": "EX-..." | "exerciseName": "Back Squat", "sets": [{ "weight": 100, "reps": 5 }] }]
  * }
  * Each exercise is matched by exerciseId, else by name within the workout (then within the
  * student's other workouts). Volume_Total is recomputed server-side from the sets.
  * Data: { session: SessionRecord }
  */
-function saveWorkoutSession_(body) {
-  const input = body.session || body;
-  const studentId = str_(input.studentId || input.userId);
-  requireUser_(studentId, 'student', 'studentId');
+function saveWorkoutSession_(user, session) {
+  requireRole_(user, 'student');
+  const input = session || {};
+  const studentId = user.id;
   const exercises = input.exercises || [];
   if (!Array.isArray(exercises)) throw new ApiError('"exercises" must be an array');
 
+  // A workout that is not the student's own is ignored; it is then inferred from the exercises.
   let workoutId = str_(input.workoutId);
+  const ownWorkout = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, workoutId));
+  if (!ownWorkout || !sameId_(ownWorkout.ID_Usuario, studentId)) workoutId = '';
   const findExercise = exerciseResolver_(studentId, workoutId);
   const sessionId = generateId_('HS');
   const setRecords = [];
@@ -346,15 +603,12 @@ function exerciseResolver_(studentId, workoutId) {
     if (sameId_(r.ID_Usuario, studentId)) studentWorkouts[str_(r.ID_Treino)] = true;
   });
   return (exerciseId, name) => {
-    if (exerciseId && byId[exerciseId]) return byId[exerciseId];
+    // Only the student's own exercises count, whatever ID the client sends.
+    if (exerciseId && byId[exerciseId] && studentWorkouts[str_(byId[exerciseId].ID_Treino)]) return byId[exerciseId];
     if (!name) return null;
     const key = name.toLowerCase();
-    const sameName = planned.filter((r) => str_(r.Nome).toLowerCase() === key);
-    return (
-      sameName.find((r) => workoutId && sameId_(r.ID_Treino, workoutId)) ||
-      sameName.find((r) => studentWorkouts[str_(r.ID_Treino)]) ||
-      null
-    );
+    const sameName = planned.filter((r) => str_(r.Nome).toLowerCase() === key && studentWorkouts[str_(r.ID_Treino)]);
+    return sameName.find((r) => workoutId && sameId_(r.ID_Treino, workoutId)) || sameName[0] || null;
   };
 }
 
@@ -404,7 +658,7 @@ function attachSets_(sessions, setRows) {
 }
 
 /**
- * GET action=getStudentStats&userId={id}
+ * POST acao=getStudentStats, args [studentId]  (students may omit it)
  * Data:
  * {
  *   summary: { totalSessions, totalVolume, totalDurationSec, averageDurationSec, averageVolume, lastSessionDate },
@@ -415,8 +669,8 @@ function attachSets_(sessions, setRows) {
  * }
  * Progress is grouped by exercise name, so the same lift in two workouts is one series.
  */
-function getStudentStats_(userId) {
-  const student = requireUser_(userId, 'student', 'userId');
+function getStudentStats_(user, studentId) {
+  const student = accessibleStudent_(user, studentId);
   const history = attachSets_(loadSessions_([student.id])).sort((a, b) => dateMs_(a.date) - dateMs_(b.date));
 
   const totalVolume = history.reduce((v, s) => v + s.totalVolume, 0);
@@ -479,17 +733,17 @@ function getStudentStats_(userId) {
 // ===============================================================================================
 
 /**
- * GET action=getTrainerDashboard&trainerId={id}
- * Students are those whose Usuarios.ID_Treinador equals trainerId. Students with no trainer
- * (or a sheet without that column) are shown to every trainer.
+ * POST acao=getTrainerDashboard, args []  (trainers only; the trainer comes from the token)
+ * Students are those whose Usuarios.ID_Treinador is this trainer, plus those with no trainer.
  * Data: {
  *   trainer: User,
  *   students: [User & { lastActivity, totalSessions, daysSinceLastSession,
  *               lastSession: { id, date, workoutId, workoutName, durationSec, totalVolume, exerciseCount, setCount } | null }]
  * }
  */
-function getTrainerDashboard_(trainerId) {
-  const trainer = requireUser_(trainerId, 'trainer', 'trainerId');
+function getTrainerDashboard_(user) {
+  requireRole_(user, 'trainer');
+  const trainer = user;
   const students = readTable_(SHEET.USERS).rows
     .map(toUser_)
     .filter((u) => u.role === 'student' && (!u.trainerId || u.trainerId === trainer.id))
@@ -545,8 +799,8 @@ function describeActivity_(daysSince) {
 }
 
 /**
- * POST action=saveWorkoutPlan
- * Body (the frontend's Workout, optionally wrapped in "workout"):
+ * POST acao=saveWorkoutPlan, args [workout]  (trainers only, for their own students)
+ * workout is the frontend's Workout:
  * { "id"?: "TR-...", "studentId": "...", "name": "...", "focus"?: "...",
  *   "exercises": [{ "id"?, "name", "sets", "reps", "weight", "restSec", "videoUrl"?, "notes"?, "rir"?, "substitute"? }] }
  * An `id` that matches an existing Treinos row updates it; otherwise a new workout is created.
@@ -554,10 +808,10 @@ function describeActivity_(daysSince) {
  * Exercise IDs already belonging to this workout are kept so logged history stays linked.
  * Data: { workout: Workout, created: boolean }
  */
-function saveWorkoutPlan_(body) {
-  const input = body.workout || body;
-  const studentId = str_(input.studentId || input.userId);
-  requireUser_(studentId, 'student', 'studentId');
+function saveWorkoutPlan_(user, workout) {
+  requireRole_(user, 'trainer');
+  const input = workout || {};
+  const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const name = str_(input.name);
   if (!name) throw new ApiError('Workout "name" is required');
   const exercises = input.exercises || [];
@@ -569,6 +823,8 @@ function saveWorkoutPlan_(body) {
   const existing = str_(input.id)
     ? readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, input.id))
     : null;
+  // Editing someone else's workout requires access to its current owner too.
+  if (existing) accessibleStudent_(user, str_(existing.ID_Usuario));
   const workoutId = existing ? str_(existing.ID_Treino) : generateId_('TR');
   const workoutRecord = {
     ID_Treino: workoutId,
@@ -610,37 +866,41 @@ function saveWorkoutPlan_(body) {
 }
 
 /**
- * POST action=deleteWorkoutPlan
- * Body: { "workoutId": "TR-..." }
+ * POST acao=deleteWorkoutPlan, args [workoutId]  (trainers only)
  * Deletes the Treinos row, its Exercicios_Treino rows and any Agenda rows pointing to it
  * (those days fall back to rest). Workout history is kept.
  * Data: { workoutId, deletedExercises, clearedScheduleEntries }
  */
-function deleteWorkoutPlan_(body) {
-  const workoutId = str_(body.workoutId || body.id);
-  if (!workoutId) throw new ApiError('Missing required field "workoutId"');
-  const matches = (r) => sameId_(r.ID_Treino, workoutId);
-  if (!replaceRecords_(SHEET.WORKOUTS, matches, [])) throw new ApiError(`Workout "${workoutId}" not found`);
+function deleteWorkoutPlan_(user, workoutId) {
+  requireRole_(user, 'trainer');
+  const id = str_(workoutId);
+  if (!id) throw new ApiError('Missing required parameter "workoutId"');
+  const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, id));
+  if (!row) throw new ApiError(`Workout "${id}" not found`);
+  accessibleStudent_(user, str_(row.ID_Usuario));
+
+  const matches = (r) => sameId_(r.ID_Treino, id);
+  replaceRecords_(SHEET.WORKOUTS, matches, []);
   return {
-    workoutId: workoutId,
+    workoutId: id,
     deletedExercises: replaceRecords_(SHEET.EXERCISES, matches, []),
     clearedScheduleEntries: replaceRecords_(SHEET.SCHEDULE, matches, []),
   };
 }
 
 /**
- * POST action=updateSchedule
- * Body (the frontend's Schedule, optionally wrapped in "schedule"):
+ * POST acao=updateSchedule, args [schedule]  (trainers only, for their own students)
+ * schedule is the frontend's Schedule:
  * { "studentId": "...", "days": [{ "day": "Monday" | "dayNumber": 1, "type": "workout|cardio|rest",
  *                                  "workoutId"?: "TR-...", "label"?: "30 min bike" }] }
  * Only the days present in `days` are replaced; other days keep their current entries.
  * Sending two entries for the same day (e.g. workout + cardio) stores both.
  * Data: { schedule: { studentId, days } }
  */
-function updateSchedule_(body) {
-  const input = body.schedule || body;
-  const studentId = str_(input.studentId || input.userId);
-  requireUser_(studentId, 'student', 'studentId');
+function updateSchedule_(user, schedule) {
+  requireRole_(user, 'trainer');
+  const input = schedule || {};
+  const studentId = accessibleStudent_(user, str_(input.studentId)).id;
   const days = input.days;
   if (!Array.isArray(days) || !days.length) throw new ApiError('"days" must be a non-empty array');
 
@@ -681,39 +941,94 @@ function updateSchedule_(body) {
 }
 
 // ===============================================================================================
-// SETUP: run by hand from the Apps Script editor (not exposed over HTTP)
+// EDITOR FUNCTIONS: run by hand from the Apps Script editor (not exposed over HTTP)
+// Pick the function in the toolbar and click Run. Results appear in the execution log.
 // ===============================================================================================
 
 /**
- * Creates any missing tab or column (optional columns included), bolds and freezes the header
- * row and formats non-numeric columns as plain text. Existing data is never touched, so it is
- * safe to run again at any time.
+ * Creates the accounts. Edit the list, run this function once, then DELETE THE PASSWORDS from
+ * the code: the spreadsheet only keeps their hash, and the app never needs them again.
+ * role: 'Trainer' or 'Student'. treinador: the trainer's login (students only, optional).
+ */
+function cadastrarUsuarios() {
+  const accounts = [
+    { login: 'marcelo', senha: 'troque-esta-senha', nome: 'Marcelo', role: 'Trainer' },
+    { login: 'aluno1', senha: 'troque-esta-senha', nome: 'Primeiro Aluno', role: 'Student', treinador: 'marcelo' },
+  ];
+  resetTableCache_();
+  accounts.forEach((account) => {
+    if (account.senha === 'troque-esta-senha') {
+      console.log(`Skipped "${account.login}": change the example password first.`);
+      return;
+    }
+    try {
+      const user = createUser_(account);
+      console.log(`Created ${user.role} "${account.login}" (${user.name}), ID ${user.id}.`);
+    } catch (err) {
+      console.log(`Error for "${account.login}": ${err.message}`);
+    }
+  });
+}
+
+/**
+ * Sets a new password for an existing account (e.g. a forgotten one). Fill in the two values,
+ * run once, then clear the password from the code. The account keeps its ID and all its data.
+ */
+function redefinirSenha() {
+  const LOGIN = 'aluno1';
+  const NOVA_SENHA = 'troque-esta-senha';
+  if (NOVA_SENHA === 'troque-esta-senha') {
+    console.log('Change NOVA_SENHA first.');
+    return;
+  }
+  if (NOVA_SENHA.length < MIN_PASSWORD_LENGTH) {
+    console.log(`The password must have at least ${MIN_PASSWORD_LENGTH} characters.`);
+    return;
+  }
+  resetTableCache_();
+  const row = findUserByLogin_(LOGIN);
+  if (!row) {
+    console.log(`Login "${LOGIN}" not found.`);
+    return;
+  }
+  setPassword_(str_(row.ID_Usuario), NOVA_SENHA);
+  CacheService.getScriptCache().remove('login-failures:' + normalizeLogin_(LOGIN));
+  console.log(`New password saved for "${LOGIN}".`);
+}
+
+/**
+ * Creates any missing tab or column, bolds and freezes the header rows, formats non-numeric
+ * columns as plain text and replaces any plain-text Senha left from older versions with
+ * Salt + SenhaHash. Existing data is kept, so it is safe to run again at any time.
  */
 function setupDatabase() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  resetTableCache_();
   Object.keys(SCHEMA).forEach((name) => {
-    const schema = SCHEMA[name];
-    const sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+    const sheet = getSheet_(name);
+    addMissingColumns_(sheet, name);
     const lastCol = sheet.getLastColumn();
-    const headers = lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h).trim()) : [];
-    const missing = schema.columns.concat(schema.optional).filter((c) => headers.indexOf(c) === -1);
-    const all = headers.concat(missing);
-
-    if (all.length > sheet.getMaxColumns()) sheet.insertColumnsAfter(sheet.getMaxColumns(), all.length - sheet.getMaxColumns());
-    if (missing.length) sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
-    sheet.getRange(1, 1, 1, all.length).setFontWeight('bold');
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h).trim());
+    sheet.getRange(1, 1, 1, lastCol).setFontWeight('bold');
     sheet.setFrozenRows(1);
 
     const maxRows = sheet.getMaxRows();
     const textColumns = [];
-    all.forEach((h, i) => {
-      if (h && schema.numeric.indexOf(h) === -1) textColumns.push(columnRangeA1_(i + 1, 2, maxRows));
+    headers.forEach((h, i) => {
+      if (h && SCHEMA[name].numeric.indexOf(h) === -1) textColumns.push(columnRangeA1_(i + 1, 2, maxRows));
     });
     if (maxRows > 1 && textColumns.length) sheet.getRangeList(textColumns).setNumberFormat('@');
-
-    console.log(`${name}: ${missing.length ? 'added ' + missing.join(', ') : 'ok'}`);
+    console.log(`${name}: ok`);
   });
+  const migrated = migratePlainTextPasswords_();
+  console.log(`${migrated} plain-text password(s) replaced by a hash.`);
+}
+
+/** Hashes every legacy plain-text Senha and blanks it. Returns how many were converted. */
+function migratePlainTextPasswords_() {
   resetTableCache_();
+  const pending = readTable_(SHEET.USERS).rows.filter((r) => str_(r.Senha) && !str_(r.SenhaHash));
+  pending.forEach((r) => setPassword_(str_(r.ID_Usuario), str_(r.Senha)));
+  return pending.length;
 }
 
 /**
@@ -727,15 +1042,11 @@ function seedDemoData() {
     console.log('Usuarios already has data; seed skipped.');
     return;
   }
-  const trainerId = 'US-coach';
-  const studentId = 'US-aluno';
-  appendRecords_(SHEET.USERS, [
-    { ID_Usuario: trainerId, Nome: 'Coach Alex Moreira', Login: 'coach', Senha: 'coach123', Role: 'Trainer' },
-    { ID_Usuario: studentId, Nome: 'Aluno Demo', Login: 'aluno', Senha: 'aluno123', Role: 'Student', ID_Treinador: trainerId },
-  ]);
+  const coach = createUser_({ login: 'coach', senha: 'coach123', nome: 'Coach Alex Moreira', role: 'Trainer' });
+  const student = createUser_({ login: 'aluno', senha: 'aluno123', nome: 'Aluno Demo', role: 'Student', treinador: 'coach' });
 
-  const push = saveWorkoutPlan_({
-    studentId: studentId,
+  const push = saveWorkoutPlan_(coach, {
+    studentId: student.id,
     name: 'Push A - Chest & Shoulders',
     focus: 'Upper push',
     exercises: [
@@ -746,8 +1057,8 @@ function seedDemoData() {
       { name: 'Cable Triceps Pushdown', sets: 3, reps: '12-15', weight: 30, restSec: 60 },
     ],
   }).workout;
-  const legs = saveWorkoutPlan_({
-    studentId: studentId,
+  const legs = saveWorkoutPlan_(coach, {
+    studentId: student.id,
     name: 'Legs - Squat Focus',
     focus: 'Lower body',
     exercises: [
@@ -757,8 +1068,8 @@ function seedDemoData() {
     ],
   }).workout;
 
-  updateSchedule_({
-    studentId: studentId,
+  updateSchedule_(coach, {
+    studentId: student.id,
     days: [
       { day: 'Monday', type: 'workout', workoutId: push.id },
       { day: 'Tuesday', type: 'cardio', label: '30 min zone 2 bike' },
@@ -770,7 +1081,7 @@ function seedDemoData() {
     ],
   });
   SpreadsheetApp.flush();
-  console.log(`Seeded trainer ${trainerId} and student ${studentId}.`);
+  console.log(`Seeded trainer ${coach.id} and student ${student.id}.`);
 }
 
 // ===============================================================================================
@@ -784,10 +1095,35 @@ function resetTableCache_() {
   tableCache_ = {};
 }
 
+/** Returns the tab, creating it with its header row the first time it is needed. */
 function getSheet_(name) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
-  if (!sheet) throw new ApiError(`Sheet "${name}" not found. Run setupDatabase() from the Apps Script editor`);
-  return sheet;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return (
+    ss.getSheetByName(name) ||
+    withLock_(() => {
+      let sheet = ss.getSheetByName(name);
+      if (!sheet) {
+        sheet = ss.insertSheet(name);
+        const columns = SCHEMA[name].columns;
+        sheet.getRange(1, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
+        sheet.setFrozenRows(1);
+      }
+      return sheet;
+    })
+  );
+}
+
+/** Appends any schema column missing from row 1 (a sheet from an older version, or made by hand). */
+function addMissingColumns_(sheet, name) {
+  withLock_(() => {
+    const lastCol = sheet.getLastColumn();
+    const headers = lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h).trim()) : [];
+    const missing = SCHEMA[name].columns.filter((c) => headers.indexOf(c) === -1);
+    if (!missing.length) return;
+    const needed = headers.length + missing.length;
+    if (needed > sheet.getMaxColumns()) sheet.insertColumnsAfter(sheet.getMaxColumns(), needed - sheet.getMaxColumns());
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+  });
 }
 
 /**
@@ -797,11 +1133,12 @@ function getSheet_(name) {
 function readTable_(name) {
   if (tableCache_[name]) return tableCache_[name];
   const sheet = getSheet_(name);
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0].map((h) => String(h).trim());
-  const missing = SCHEMA[name].columns.filter((c) => headers.indexOf(c) === -1);
-  if (missing.length) {
-    throw new ApiError(`Sheet "${name}" is missing column(s): ${missing.join(', ')}. Run setupDatabase()`);
+  let values = sheet.getDataRange().getValues();
+  let headers = values[0].map((h) => String(h).trim());
+  if (SCHEMA[name].columns.some((c) => headers.indexOf(c) === -1)) {
+    addMissingColumns_(sheet, name);
+    values = sheet.getDataRange().getValues();
+    headers = values[0].map((h) => String(h).trim());
   }
   const rows = [];
   for (let i = 1; i < values.length; i++) {
@@ -1008,7 +1345,7 @@ function initials_(name) {
   return (first + last).toUpperCase();
 }
 
-/** Whitelisted fields only: Senha and Login are never serialized. */
+/** Whitelisted fields only: Login, Salt, SenhaHash and any legacy Senha are never serialized. */
 function toUser_(row) {
   const name = str_(row.Nome);
   return {

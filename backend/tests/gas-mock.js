@@ -12,6 +12,9 @@ const crypto = require('node:crypto');
 
 const CODE_FILE = path.join(__dirname, '..', 'Code.gs');
 
+/** Apps Script returns bytes as Java's signed values (-128..127). */
+const signedBytes = (buffer) => Array.from(buffer, (b) => (b > 127 ? b - 256 : b));
+
 function columnNumber(letters) {
   return letters.split('').reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0);
 }
@@ -199,10 +202,16 @@ class FakeSpreadsheet {
   }
 }
 
-/** Loads Code.gs into a fresh V8 context with the mocked Apps Script services as globals. */
+/**
+ * Loads Code.gs into a fresh V8 context with the mocked Apps Script services as globals.
+ * Script properties (the password pepper and token secret) and the script cache (login
+ * failure counters) live for as long as the returned object, like one deployed project.
+ */
 function createGas({ newSheetRows = 5 } = {}) {
   const ss = new FakeSpreadsheet(newSheetRows);
   const stats = { locks: 0, releases: 0, flushes: 0 };
+  const props = {};
+  const cacheEntries = new Map();
   const context = vm.createContext({
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
@@ -226,12 +235,39 @@ function createGas({ newSheetRows = 5 } = {}) {
     },
     Utilities: {
       getUuid: () => crypto.randomUUID(),
+      Charset: { UTF_8: 'UTF_8' },
+      computeHmacSha256Signature: (text, key) =>
+        signedBytes(crypto.createHmac('sha256', String(key)).update(String(text), 'utf8').digest()),
+      base64EncodeWebSafe: (text) => Buffer.from(String(text), 'utf8').toString('base64url'),
+      base64DecodeWebSafe(text) {
+        if (!/^[A-Za-z0-9_-]*=*$/.test(text)) throw new Error('Could not decode string.');
+        return signedBytes(Buffer.from(text, 'base64url'));
+      },
+      newBlob: (bytes) => ({ getDataAsString: () => Buffer.from(bytes.map((b) => (b + 256) % 256)).toString('utf8') }),
       formatDate(date, tz, format) {
         if (format !== 'yyyy-MM-dd') throw new Error(`Unsupported format ${format}`);
         return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
       },
     },
     Session: { getScriptTimeZone: () => 'America/Sao_Paulo' },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (k) => (k in props ? props[k] : null),
+        setProperty: (k, v) => {
+          props[k] = String(v);
+        },
+      }),
+    },
+    CacheService: {
+      getScriptCache: () => ({
+        get(k) {
+          const entry = cacheEntries.get(k);
+          return entry && entry.expiresAt > Date.now() ? entry.value : null;
+        },
+        put: (k, v, ttlSeconds = 600) => cacheEntries.set(k, { value: String(v), expiresAt: Date.now() + ttlSeconds * 1000 }),
+        remove: (k) => cacheEntries.delete(k),
+      }),
+    },
     LockService: {
       getScriptLock: () => ({
         tryLock: () => (stats.locks++, true),
@@ -248,19 +284,26 @@ function createGas({ newSheetRows = 5 } = {}) {
     return JSON.parse(output.getContent());
   };
 
+  const post = (body) =>
+    response(
+      context.doPost({
+        parameter: {},
+        postData: { contents: typeof body === 'string' ? body : JSON.stringify(body), type: 'text/plain' },
+      }),
+    );
+
   return {
     ss,
     stats,
     context,
+    props,
+    /** Test helper: lets every cached login-failure counter expire. */
+    expireCache: () => cacheEntries.clear(),
     sheet: (name) => ss.getSheetByName(name),
+    /** The app's only request shape: POST { acao, args, token }. */
+    call: (acao, args = [], token = '') => post({ acao, args, token }),
+    post,
     get: (params) => response(context.doGet({ parameter: params })),
-    post: (body, params = {}) =>
-      response(
-        context.doPost({
-          parameter: params,
-          postData: { contents: typeof body === 'string' ? body : JSON.stringify(body), type: 'text/plain' },
-        }),
-      ),
     options: () => response(context.doOptions({})),
   };
 }

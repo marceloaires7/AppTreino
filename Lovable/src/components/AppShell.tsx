@@ -1,6 +1,7 @@
 import { Link, useRouter } from "@tanstack/react-router";
 import { LogOut } from "lucide-react";
 import type { ReactNode } from "react";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/context/AppContext";
 
@@ -28,6 +29,7 @@ export function AppShell({ title, subtitle, back, children, footer }: Props) {
                 <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
               ) : null}
             </div>
+            {user ? <ChangePasswordDialog /> : null}
             {user ? (
               <Button
                 variant="ghost"

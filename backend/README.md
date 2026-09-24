@@ -2,9 +2,9 @@
 
 Backend for the IronLog app. The frontend (`../Lovable`) is hosted on GitHub Pages. The backend
 is a single file, [`Code.gs`](Code.gs): the only file in an Apps Script project bound to a
-Google Spreadsheet, whose tabs are the database. The frontend calls the Web App's `/exec` URL.
-JSON response shapes match the frontend's `src/lib/types.ts`, so `src/lib/api.ts` can switch
-from mock data to `fetch()` without changing the UI code.
+Google Spreadsheet, whose tabs are the database. The login and the way the app talks to the
+backend come from the TreinoFácil app (`marceloaires7/TreinoFacil`): hashed passwords, signed
+tokens, and a single `POST { acao, args, token }`.
 
 ```
 Code.gs      the whole backend: paste it into the Apps Script editor
@@ -12,119 +12,144 @@ README.md    this file
 tests/       Node test suite for Code.gs; stays in the repo, never uploaded to Apps Script
 ```
 
-`Code.gs` is divided into sections: configuration (sheet schema), entry points and routing,
-auth, student endpoints, trainer endpoints, setup, data layer, and mappers.
+`Code.gs` is divided into sections: configuration, entry points and routing, auth (passwords,
+tokens, access rules), student endpoints, trainer endpoints, editor functions, data layer, and
+mappers.
 
 ## Deploy
 
 1. Create a Google Spreadsheet and open **Extensions → Apps Script**.
-2. Replace the contents of `Code.gs` in the editor with [`Code.gs`](Code.gs) from this folder,
-   then save. No other file is needed. Web App settings are chosen in the deploy dialog, and
-   the `@OnlyCurrentDoc` line at the top limits the script's access to this one spreadsheet.
-3. In the editor, choose `setupDatabase` from the function menu and click **Run**, then approve
-   access. This creates the 6 tabs and their headers. Run it again any time; it only adds what
-   is missing.
-4. Optional: run `seedDemoData` to create a trainer (`coach` / `coach123`), a student
-   (`aluno` / `aluno123`), two workouts and a weekly schedule.
-5. **Deploy → New deployment → Web app**. Set **Execute as: Me** and **Who has access: Anyone**,
-   then copy the `/exec` URL.
-6. Check that it works by opening `<URL>?action=ping` in a browser.
+2. Replace the contents of `Code.gs` in the editor with [`Code.gs`](Code.gs), then save. No
+   other file is needed. The `@OnlyCurrentDoc` line at the top limits the script to this
+   spreadsheet.
+3. Create the accounts, choosing one of these options:
+   - **Real accounts:** edit the list at the start of `cadastrarUsuarios`, choose that function
+     in the toolbar and click **Run**. The execution log confirms each account. Then **delete
+     the passwords from the code**, because the spreadsheet only keeps their hash.
+   - **Demo data:** run `seedDemoData`. It creates a trainer (`coach` / `coach123`), a student
+     (`aluno` / `aluno123`), two workouts and a weekly schedule.
+
+   The first run asks for authorization: choose your account, click **Advanced → Go to (unsafe)
+   → Allow**. The "unverified app" warning is expected, because the app is your own script.
+4. **Deploy → New deployment → Web app**. Set **Execute as: Me** and **Who has access:
+   Anyone**, then copy the `/exec` URL into the GitHub repository variable `VITE_API_URL`.
+5. Check that it works by opening `<URL>` or `<URL>?acao=ping` in a browser.
+
+You never create the tabs by hand: they are created, with their headers, the first time they
+are needed. `setupDatabase` also formats them, and can be run again at any time.
 
 After changing `Code.gs`, open **Deploy → Manage deployments → Edit** and choose
 **Version: New version**. The `/exec` URL keeps serving the old version until you do this.
-The URL itself does not change, so the frontend on GitHub Pages does not need a new build.
+The URL itself does not change.
 
-## Calling it from the frontend
+### Upgrading a spreadsheet from the version without tokens
 
-Apps Script cannot answer CORS preflight (`OPTIONS`) requests. `doOptions` exists, but Google
-does not route OPTIONS requests to it. Every POST must therefore be a simple request: send the
-JSON body with `Content-Type: text/plain`, never `application/json`, and add no custom headers.
-GET requests need nothing special. Google responds with a redirect that `fetch` follows on its
-own.
+That version stored passwords in plain text in `Usuarios.Senha` and trusted the `userId` sent
+by the app. To upgrade:
 
-```ts
-const API_URL = import.meta.env.VITE_GAS_URL as string; // the /exec URL
+1. Paste the new `Code.gs` and publish a **new version**.
+2. Push the new frontend right away, because the old app cannot talk to the new backend.
+3. Optionally run `setupDatabase` to hash every plain-text password at once. Otherwise each
+   password is hashed the first time its owner signs in. Either way the `Senha` cell is blanked;
+   when it is empty for everyone, you can delete that column.
 
-export async function gas<T>(
-  action: string,
-  opts: { params?: Record<string, string>; body?: unknown } = {},
-): Promise<T> {
-  const url = new URL(API_URL);
-  url.searchParams.set("action", action);
-  for (const [k, v] of Object.entries(opts.params ?? {})) url.searchParams.set(k, v);
+The new columns (`Salt`, `SenhaHash`, `CriadoEm`) are added on their own. Everyone has to sign in
+again once, because sessions saved by the old app have no token.
 
-  const res = await fetch(
-    url,
-    opts.body === undefined
-      ? undefined
-      : {
-          method: "POST",
-          // text/plain keeps this a "simple" request, so the browser sends no preflight.
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(opts.body),
-        },
-  );
-  const json = await res.json();
-  if (json.status !== "success") throw new Error(json.message);
-  return json.data as T;
-}
+## Accounts
 
-// e.g. gas<{ user: User }>("login", { body: { Login, Senha } })
-//      gas("getStudentData", { params: { userId } })
+| Task | How |
+| --- | --- |
+| Create accounts | `cadastrarUsuarios` in the editor. `role` is `Trainer` or `Student`. For a student, `treinador` is the trainer's login. |
+| Change your own password | The key icon in the app header. It asks for the current password. |
+| Forgotten password | `redefinirSenha` in the editor: fill in the login and the new password, run it, then delete the password from the code. The account keeps its ID and all its data. |
+| Locked login | Five wrong passwords lock that login for 15 minutes. `redefinirSenha` also unlocks it. |
+
+The app has no sign-up screen on purpose. The API URL is public, so anyone who found it could
+otherwise fill the spreadsheet with accounts.
+
+Logins are 3–30 characters (lowercase letters, numbers, `.`, `-`, `_`) and are
+case-insensitive. Passwords have at least 6 characters. New accounts get the ID `US-<login>`.
+
+## How the app talks to the backend
+
+There is one request shape, a POST to the `/exec` URL:
+
+```json
+{ "acao": "getStudentData", "args": ["US-aluno"], "token": "<token from login>" }
 ```
 
-How each mock method in `src/lib/api.ts` maps to the API:
+It is answered with one of:
 
-| `api.ts` today | Endpoint |
-| --- | --- |
-| `login` | `POST login`. The UI needs a Login/Senha form instead of the role picker |
-| `getUser`, `getStudentWorkouts`, `getSchedule` | `GET getStudentData` → `user`, `workouts`, `schedule` |
-| `getWorkout` | `GET getWorkout` → `workout` |
-| `getStudents` | `GET getTrainerDashboard` → `students` |
-| `getHistory` | `GET getStudentStats` → `history` |
-| `saveWorkout` / `deleteWorkout` | `POST saveWorkoutPlan` / `POST deleteWorkoutPlan` |
-| `saveSchedule` | `POST updateSchedule` |
-| `saveWorkoutSession` | `POST saveWorkoutSession` |
+```json
+{ "ok": true, "dados": { } }
+{ "ok": false, "erro": "Your session has expired. Please sign in again", "codigo": "SESSAO_INVALIDA" }
+```
+
+- **Only `login` and `ping` work without a token.** Every other action receives the signed-in
+  user, read from the token, as its first argument. What the client sends in `args` never
+  decides who it is.
+- **`codigo: "SESSAO_INVALIDA"`** means the token is missing, expired, forged, or belongs to a
+  deleted account. The app then forgets the session and goes back to the login.
+- **Content type.** The body is JSON sent as `Content-Type: text/plain`. With
+  `application/json` the browser would send a CORS preflight (`OPTIONS`), which Apps Script
+  does not answer. `doOptions` exists, but Google does not route OPTIONS requests to it.
+- **GET only answers `ping`**, so tokens never end up in URLs or browser history.
+- **HTTP status.** Every response is HTTP 200, because Apps Script cannot set status codes.
+
+In the frontend, `Lovable/src/lib/api.ts` is the only code that talks to the backend. Its
+`call(acao, args)` function adds the token, and `src/lib/session.ts` keeps
+`{ token, expiresAt, user }` in `localStorage` under `gymapp.session`.
+
+## Access rules
+
+"Their students" means students whose `ID_Treinador` is the trainer, plus students with no
+trainer yet, which is the same list the dashboard shows.
+
+| Action | `args` | Student | Trainer |
+| --- | --- | --- | --- |
+| `login` | `[login, senha]` | public | public |
+| `ping` | `[]` | public | public |
+| `changePassword` | `[currentPassword, newPassword]` | own | own |
+| `getStudentData` | `[studentId]` | self (may omit the ID) | their students |
+| `getStudentStats` | `[studentId]` | self (may omit the ID) | their students |
+| `getWorkout` | `[workoutId]` | own workouts | their students' workouts |
+| `saveWorkoutSession` | `[session]` | always saved as self | — |
+| `getTrainerDashboard` | `[]` | — | self |
+| `saveWorkoutPlan` | `[workout]` | — | their students |
+| `deleteWorkoutPlan` | `[workoutId]` | — | their students |
+| `updateSchedule` | `[schedule]` | — | their students |
+
+Anything else is refused with an error such as `Only trainers can do this` or
+`You do not have access to this student`.
 
 ## API reference
 
-Every response is HTTP 200 with one of these bodies (Apps Script cannot set HTTP status codes):
+The objects match the frontend's `Lovable/src/lib/types.ts`.
+
+### `login` → `{ token, expiresAt, user }`
 
 ```json
-{ "status": "success", "data": { } }
-{ "status": "error", "message": "Invalid credentials" }
+{ "token": "VVMtYWx1bm98MTc5Mj….2000275282cfe3…", "expiresAt": 1792871938324,
+  "user": { "id": "US-aluno", "name": "Aluno Demo", "role": "student", "trainerId": "US-coach", "initials": "AD" } }
 ```
 
-For POST, `action` can be sent in the query string (`?action=login`) or in the JSON body.
-POST bodies may also be wrapped in a key: `{ "workout": {...} }`, `{ "schedule": {...} }` or
-`{ "session": {...} }`.
+The token lasts 30 days. A wrong password and an unknown login get the same answer,
+`Invalid credentials`, and take the same time, so the response does not reveal which logins
+exist. The response never contains the login, `Salt`, `SenhaHash` or `Senha`.
 
-### `POST login`
-
-```json
-{ "action": "login", "Login": "aluno", "Senha": "aluno123" }
-```
-
-Login is case-insensitive. The keys `login` and `password` are also accepted. The response
-never contains `Senha`:
-
-```json
-{ "user": { "id": "US-aluno", "name": "Aluno Demo", "role": "student", "trainerId": "US-coach", "initials": "AD" },
-  "role": "student" }
-```
-
-### `GET getStudentData&userId={id}`
+### `getStudentData` → `{ user, workouts, schedule }`
 
 ```json
 {
-  "user": { "id": "...", "name": "...", "role": "student", "trainerId": "...", "initials": "AD" },
+  "user": { "id": "US-aluno", "name": "Aluno Demo", "role": "student", "trainerId": "US-coach", "initials": "AD" },
   "workouts": [{
-    "id": "TR-…", "name": "Push A", "studentId": "…", "focus": "Upper push",
+    "id": "TR-…", "name": "Push A", "studentId": "US-aluno", "focus": "Upper push",
     "exercises": [{ "id": "EX-…", "order": 1, "name": "Barbell Bench Press", "sets": 4, "reps": "8",
                     "weight": 80, "restSec": 120, "videoUrl": "…", "notes": "…", "rir": "RIR 2",
                     "substitute": "Dumbbell Bench Press" }]
   }],
-  "schedule": { "studentId": "…", "days": [
+  "schedule": { "studentId": "US-aluno", "days": [
     { "day": "Monday", "dayNumber": 1, "type": "workout", "workoutId": "TR-…", "workoutName": "Push A" },
     { "day": "Tuesday", "dayNumber": 2, "type": "cardio", "label": "30 min zone 2 bike" },
     { "day": "Sunday", "dayNumber": 7, "type": "rest" }
@@ -132,43 +157,34 @@ never contains `Senha`:
 }
 ```
 
-`sets`, `weight` and `restSec` are always numbers. `reps` is always a string, so ranges like
-`"8-12"` work. Empty optional fields are left out. `days` always covers all 7 days: a day with
-no Agenda row comes back as `rest`.
+- `sets`, `weight` and `restSec` are always numbers.
+- `reps` is always a string, so ranges like `"8-12"` work.
+- Empty optional fields are left out.
+- `days` covers all 7 days: a day with no Agenda row comes back as `rest`.
 
-### `GET getWorkout&workoutId={id}`
+### `getWorkout` → `{ workout }`
 
-Returns `{ "workout": Workout }` in the same shape as in `getStudentData`, or
-`{ "workout": null }` when no workout has that ID.
+The workout has the same shape as in `getStudentData`. It is `null` when no workout has that ID.
 
-### `POST saveWorkoutSession`
+### `saveWorkoutSession` → `{ session }`
 
-This is the frontend's `SessionRecord`:
+`session` is the frontend's `SessionRecord`:
 
 ```json
-{
-  "action": "saveWorkoutSession",
-  "studentId": "US-aluno", "workoutId": "TR-…", "date": "2026-09-22T10:00:00.000Z",
-  "durationSec": 3480,
-  "exercises": [
-    { "exerciseName": "Back Squat", "sets": [{ "weight": 100, "reps": 5 }, { "weight": 100, "reps": 5 }] }
-  ]
-}
+{ "workoutId": "TR-…", "date": "2026-09-22T10:00:00.000Z", "durationSec": 3480,
+  "exercises": [{ "exerciseName": "Back Squat", "sets": [{ "weight": 100, "reps": 5 }] }] }
 ```
 
-- The API writes one row to `Historico_Execucao` and all the sets to `Historico_Series`, each
-  with a single `setValues` call.
-- Each exercise is matched by `exerciseId` if one is sent. Otherwise it is matched by name,
-  first within `workoutId` and then within the student's other workouts.
-- `Volume_Total` is recalculated on the server as Σ weight × reps. Any `totalVolume` in the
-  request is ignored when sets are present.
-- `date` defaults to now. Sets with `"done": false` are skipped.
+- The session is saved for the student in the token, whatever `studentId` the record contains.
+- One row goes to `Historico_Execucao`, and all the sets go to `Historico_Series` in a single
+  `setValues` call.
+- Each exercise is matched by `exerciseId`, or else by name, first within `workoutId` and then
+  within the student's other workouts. Only the student's own workouts and exercises are
+  considered.
+- `Volume_Total` is recalculated as Σ weight × reps.
+- `date` defaults to now. Sets marked `"done": false` are skipped.
 
-Returns `{ "session": SessionRecord }`, which includes the server-generated `id`.
-
-### `GET getStudentStats&userId={id}`
-
-Returns data ready to chart (for example with Recharts):
+### `getStudentStats` → `{ summary, volumeOverTime, exerciseProgress, history }`
 
 ```json
 {
@@ -176,19 +192,18 @@ Returns data ready to chart (for example with Recharts):
                "averageDurationSec": 3417, "averageVolume": 7017.5, "lastSessionDate": "…" },
   "volumeOverTime": [{ "date": "…", "sessionId": "HS-…", "workoutName": "Legs", "totalVolume": 7010, "durationSec": 3600 }],
   "exerciseProgress": [{
-    "exerciseName": "Back Squat", "exerciseIds": ["EX-…"],
-    "personalRecord": { "weight": 110, "date": "…" },
+    "exerciseName": "Back Squat", "exerciseIds": ["EX-…"], "personalRecord": { "weight": 105, "date": "…" },
     "data": [{ "date": "…", "sessionId": "HS-…", "topWeight": 105, "volume": 1315,
                "totalReps": 13, "sets": 3, "estimated1RM": 116.7 }]
   }],
-  "history": [ "SessionRecord, oldest first, the same shape ProgressCharts uses today" ]
+  "history": [ "SessionRecord, oldest first" ]
 }
 ```
 
-Progress is grouped by exercise name, so the same lift in two different workouts forms one
-series. `estimated1RM` uses the Epley formula.
+- Progress is grouped by exercise name, so the same lift in two workouts forms one series.
+- `estimated1RM` uses the Epley formula.
 
-### `GET getTrainerDashboard&trainerId={id}`
+### `getTrainerDashboard` → `{ trainer, students }`
 
 ```json
 {
@@ -202,102 +217,81 @@ series. `estimated1RM` uses the Epley formula.
 }
 ```
 
-The list contains students whose `ID_Treinador` equals `trainerId`, plus students with an
-empty `ID_Treinador`. `lastSession` is `null` for students who have never trained, and
-`lastActivity` is left out for them.
+For a student who has never trained, `lastSession` is `null` and `lastActivity` is left out.
 
-### `POST saveWorkoutPlan`
+### `saveWorkoutPlan` → `{ workout, created }`
 
-This is the frontend's `Workout`:
+`workout` is the frontend's `Workout`, with `studentId`, `name`, an optional `focus`, and
+`exercises`.
 
-```json
-{
-  "action": "saveWorkoutPlan",
-  "workout": {
-    "id": "TR-… (omit to create)", "studentId": "US-aluno", "name": "Push A", "focus": "Upper push",
-    "exercises": [{ "id": "EX-… (optional)", "name": "Bench Press", "sets": 4, "reps": "8",
-                    "weight": 80, "restSec": 120, "videoUrl": "", "notes": "", "rir": "", "substitute": "" }]
-  }
-}
-```
+- An `id` that matches a row in `Treinos` updates that workout. Any other `id` (such as the
+  builder's temporary `w-<timestamp>`) creates a new one.
+- The workout's old exercises are deleted and the new list is inserted (cascade).
+- Exercises that already belonged to the workout keep their IDs, so logged history stays linked
+  to them.
 
-- If `id` matches a row in `Treinos`, that row is updated. Any other `id` (for example the
-  builder's `w-<timestamp>`) creates a new workout with a server-generated ID.
-- The workout's old `Exercicios_Treino` rows are always deleted and the new list is inserted
-  (cascade). `Ordem` follows the array order.
-- An exercise keeps its ID when that ID already belongs to this workout, so logged history stays
-  linked to it. New or temporary IDs are replaced with server IDs.
+### `deleteWorkoutPlan` → `{ workoutId, deletedExercises, clearedScheduleEntries }`
 
-Returns `{ "workout": Workout, "created": true|false }`.
+Deletes the workout, its exercises, and the Agenda rows that point to it, so those days become
+rest. History is kept.
 
-### `POST deleteWorkoutPlan`
+### `updateSchedule` → `{ schedule }`
 
-```json
-{ "action": "deleteWorkoutPlan", "workoutId": "TR-…" }
-```
+`schedule` is `{ studentId, days: [{ day | dayNumber, type, workoutId?, label? }] }`.
 
-Deletes the workout, its exercises and any Agenda rows that point to it (those days become
-rest). Workout history is kept. Returns
-`{ "workoutId", "deletedExercises", "clearedScheduleEntries" }`.
+- `day` is an English weekday name; `dayNumber` is 1–7, with Monday = 1.
+- `type` is `workout`, `cardio` or `rest`.
+- Only the days sent are replaced.
+- A `workout` day must use one of that student's workouts.
 
-### `POST updateSchedule`
+### `changePassword` → `{ changed: true }`
 
-This is the frontend's `Schedule`:
+Needs the current password. The new one must have at least 6 characters.
 
-```json
-{
-  "action": "updateSchedule",
-  "schedule": { "studentId": "US-aluno", "days": [
-    { "day": "Monday", "type": "workout", "workoutId": "TR-…" },
-    { "day": "Tuesday", "type": "cardio", "label": "30 min bike" },
-    { "dayNumber": 7, "type": "rest" }
-  ] }
-}
-```
+## Spreadsheet
 
-- `day` accepts an English weekday name. `dayNumber` accepts 1–7, with Monday = 1 (ISO-8601).
-- Only the days you send are replaced. The rest of the week is left as it is.
-- A `workout` day must reference a workout that belongs to this student.
+| Tab | Columns |
+| --- | --- |
+| `Usuarios` | `ID_Usuario`, `Nome`, `Login`, `Role`, `ID_Treinador`, `Salt`, `SenhaHash`, `CriadoEm` |
+| `Treinos` | `ID_Treino`, `ID_Usuario`, `Nome_do_Treino`, `Descricao` |
+| `Exercicios_Treino` | `ID_Exercicio`, `ID_Treino`, `Ordem`, `Nome`, `Series`, `Reps`, `Carga_kg`, `Descanso_seg`, `Link_Video`, `Anotacoes`, `RIR_RPE`, `Exercicio_Substituto` |
+| `Agenda` | `ID_Agenda`, `ID_Usuario`, `Dia_Semana`, `Tipo_Atividade`, `ID_Treino`, `Descricao` |
+| `Historico_Execucao` | `ID_Historico`, `ID_Usuario`, `Data`, `Tempo_Duracao_seg`, `Volume_Total`, `ID_Treino` |
+| `Historico_Series` | `ID_Historico`, `ID_Exercicio`, `Serie_Num`, `Reps_Feitas`, `Carga_Usada`, `Nome_Exercicio` |
 
-Returns `{ "schedule": { studentId, days } }`.
-
-### `GET ping`
-
-Health check: `{ "service": "gym-training-api", "version": "1.0.0", "time": "…" }`.
-
-## Spreadsheet notes
-
-**Columns.** The API requires the columns defined in the PRD, in any order, and reports an error
-naming any that are missing. `setupDatabase()` also adds these optional columns at the end of
-their tabs. They fill gaps between the PRD schema and the frontend. The API still works
-without them.
-
-| Tab | Optional column | Without it |
-| --- | --- | --- |
-| `Usuarios` | `ID_Treinador` | Every trainer sees every student |
-| `Agenda` | `Descricao` | Cardio days have no `label` (e.g. "30 min bike") |
-| `Historico_Execucao` | `ID_Treino` | The workout is inferred from the logged exercises |
-| `Historico_Series` | `Nome_Exercicio` | History for an exercise deleted from its plan shows "Unknown exercise" |
-
-**Data rules.**
-
-- **Text columns.** The API formats every non-numeric column as plain text when it writes. This
-  stops Sheets from turning `8-12` reps into a date or a `0123` password into `123`. If you type
-  data by hand, run `setupDatabase()` first so those columns are already text.
-- **Number parsing.** Numbers typed as text, including Brazilian formats like `82,5` or
-  `1.234,5`, are converted to numbers when read.
-- **IDs.** New IDs look like `TR-3f9a0c1d2b4e`. Rows you add by hand can use any unique value.
+- **Missing tabs and columns.** They are added on first use, at the end of the header row.
+  Existing columns can be in any order, and extra columns are left alone.
+- **Text columns.** Every non-numeric column is written as plain text, so Sheets does not turn
+  `8-12` reps into a date. If you type data by hand, run `setupDatabase` first so those columns
+  are already text.
+- **Numbers typed as text** are converted when read, including Brazilian formats such as `82,5`
+  and `1.234,5`.
 - **Concurrency.** All writes run under `LockService`, so two saves at the same moment cannot
   overwrite each other.
 
 ## Security
 
-- The Web App is public, and requests are identified only by the `userId` or `trainerId` they
-  send, as the PRD specifies (stateless, no tokens). Anyone who has the `/exec` URL and a user
-  ID can read that user's data. Keep the URL out of public repositories. If that matters later,
-  add a signed session token to `login`.
-- Passwords are stored in plain text in `Usuarios.Senha`. Share the spreadsheet only with
-  people allowed to see them.
+**What is protected:**
+
+- **Passwords are never stored.** `SenhaHash` is `HMAC(pepper, salt|senha)` repeated 300 times,
+  with a random salt per account. The pepper lives in the script properties (`PEPPER_SENHA`),
+  not in the spreadsheet, so someone with a copy of the spreadsheet cannot test passwords.
+- **Tokens.** A token is `payload.signature`: the payload holds the user ID and the expiry, and
+  the signature is an HMAC with a second script-property secret (`SEGREDO_TOKEN`). Editing the
+  payload breaks the signature.
+- **Identity.** Every action takes the user from the token, and the access rules above limit
+  what each role can reach.
+- **Brute force.** Five wrong passwords lock a login for 15 minutes.
+- **Timing.** Hash and signature comparisons do not stop at the first different character.
+
+**What is not protected:**
+
+- **Signing out does not revoke the token.** Changing a password does not revoke it either.
+  Tokens expire after 30 days. To sign everyone out immediately, delete `SEGREDO_TOKEN` in
+  **Project Settings → Script properties**. A new secret is created on the next login.
+- **Do not delete `PEPPER_SENHA`.** Deleting it makes every password stop working, and they
+  would all have to be reset with `redefinirSenha`.
+- **Public URL.** The `/exec` URL is public. Without a token it only answers `login` and `ping`.
 
 ## Tests
 
@@ -305,7 +299,12 @@ without them.
 node --test tests/api.test.js   # from this folder; Node 18+, no dependencies
 ```
 
-The suite loads `Code.gs` into a V8 context against an in-memory mock of `SpreadsheetApp`.
-The mock reproduces Sheets' automatic type conversion and its range bounds. The tests cover
-every endpoint, cascade deletes, casting, a spreadsheet with only the PRD columns, and a check
-that the code never calls `appendRow` or `HtmlService`.
+The suite loads `Code.gs` into a V8 context against an in-memory mock of the Apps Script
+services. The mock reproduces Sheets' type conversion and range bounds, HMAC with signed bytes,
+script properties, and a cache with expiry. It covers:
+
+- hashing, the lockout, and forged or expired tokens;
+- the upgrade from plain-text passwords;
+- every access rule and every endpoint;
+- automatic creation of tabs and columns;
+- the protocol, including that `appendRow` and `HtmlService` are never used.

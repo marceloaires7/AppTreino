@@ -33,7 +33,7 @@ function TrainerDashboard() {
   const { data: students, isPending } = useQuery({
     queryKey: ["students", user?.id],
     enabled: !!user,
-    queryFn: () => (user ? api.getStudents(user.id) : Promise.resolve([])),
+    queryFn: () => (user ? api.getStudents() : Promise.resolve([])),
   });
 
   return (

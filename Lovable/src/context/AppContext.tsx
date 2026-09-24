@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api } from "@/lib/api";
+import { api, clearApiCache, setSessionExpiredHandler } from "@/lib/api";
+import { clearSession, readSession, saveSession } from "@/lib/session";
 import type { SessionRecord, User } from "@/lib/types";
 
 interface AppState {
@@ -21,40 +22,32 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
-// The API is stateless, so the signed-in user (never the password) is kept in the browser.
-const STORAGE_KEY = "gymapp.user";
-
-function readStoredUser(): User | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    const user = raw ? (JSON.parse(raw) as User) : null;
-    return user && (user.role === "trainer" || user.role === "student") ? user : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [lastSession, setLastSession] = useState<SessionRecord | null>(null);
 
-  useEffect(() => {
-    setUser(readStoredUser());
-    setReady(true);
-  }, []);
-
-  const login = useCallback(async (login: string, password: string) => {
-    const u = await api.login(login, password);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
-    setUser(u);
-    return u;
-  }, []);
-
   const logout = useCallback(() => {
-    window.localStorage.removeItem(STORAGE_KEY);
+    clearSession();
+    clearApiCache();
     setUser(null);
     setLastSession(null);
+  }, []);
+
+  useEffect(() => {
+    setUser(readSession()?.user ?? null);
+    setReady(true);
+    // The backend rejected the token (expired, forged or account removed): back to the login.
+    setSessionExpiredHandler(logout);
+    return () => setSessionExpiredHandler(null);
+  }, [logout]);
+
+  const login = useCallback(async (login: string, password: string) => {
+    const session = await api.login(login, password);
+    saveSession(session);
+    clearApiCache();
+    setUser(session.user);
+    return session.user;
   }, []);
 
   const value = useMemo(

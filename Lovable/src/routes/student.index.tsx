@@ -1,14 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BarChart3, CalendarDays, Dumbbell, Flame, Home, Moon, Play } from "lucide-react";
+import { BarChart3, CalendarDays, Dumbbell, Flame, Home, Moon, Play, Timer } from "lucide-react";
+import { useEffect, useState } from "react";
 import { AppShell, TabBar } from "@/components/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRequireRole } from "@/hooks/useRequireRole";
+import { countSets, readActiveWorkout, type ActiveWorkout } from "@/lib/activeWorkout";
 import { api } from "@/lib/api";
 import { dayLabel, formatDate, formatNumber, plural } from "@/lib/format";
+import { formatMuscleGroups } from "@/lib/muscles";
 import { WEEK_DAYS } from "@/lib/types";
 
 export const Route = createFileRoute("/student/")({
@@ -52,8 +55,14 @@ function StudentHome() {
     },
   });
 
+  // A workout left unfinished on this device, to pick up where it stopped.
+  const [active, setActive] = useState<ActiveWorkout | null>(null);
+  useEffect(() => setActive(user ? readActiveWorkout(user.id) : null), [user]);
+
   const today = data?.schedule?.days.find((d) => d.day === todayName);
   const workout = data?.workouts.find((w) => w.id === today?.workoutId);
+  const todayWorkoutId = today?.type === "workout" ? workout?.id : undefined;
+  const muscles = workout ? formatMuscleGroups(workout.exercises) : "";
   const recent = [...(data?.history ?? [])].reverse().slice(0, 3);
   const weekVolume = (data?.history ?? [])
     .filter((h) => Date.now() - +new Date(h.date) < 7 * 864e5)
@@ -69,6 +78,9 @@ function StudentHome() {
         <LoadingState />
       ) : (
         <>
+          {active && active.workoutId !== todayWorkoutId ? (
+            <ActiveWorkoutCard workout={active} />
+          ) : null}
           <Card className="border-primary/40 bg-gradient-to-br from-primary/15 to-transparent">
             <CardHeader className="pb-2">
               <Badge variant="secondary" className="w-fit">
@@ -81,10 +93,18 @@ function StudentHome() {
                     ? (today.label ?? "Sessão de cardio")
                     : "Descanso e recuperação"}
               </CardTitle>
+              {todayWorkoutId && muscles ? (
+                <p className="text-sm font-semibold text-primary">{muscles}</p>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-4">
               {today?.type === "workout" && workout ? (
                 <>
+                  {workout.description ? (
+                    <p className="line-clamp-3 whitespace-pre-line text-sm">
+                      {workout.description}
+                    </p>
+                  ) : null}
                   <p className="text-sm text-muted-foreground">
                     {plural(workout.exercises.length, "exercício", "exercícios")} ·{" "}
                     {plural(
@@ -96,7 +116,8 @@ function StudentHome() {
                   </p>
                   <Button asChild className="h-16 w-full text-lg font-bold">
                     <Link to="/student/workout/$id" params={{ id: workout.id }}>
-                      <Play className="size-6" /> Começar treino
+                      <Play className="size-6" />{" "}
+                      {active?.workoutId === workout.id ? "Continuar treino" : "Começar treino"}
                     </Link>
                   </Button>
                 </>
@@ -156,5 +177,30 @@ function StudentHome() {
         </>
       )}
     </AppShell>
+  );
+}
+
+function ActiveWorkoutCard({ workout }: { workout: ActiveWorkout }) {
+  const { done, total } = countSets(workout);
+  return (
+    <Card className="mb-4 border-primary/60">
+      <CardContent className="flex items-center gap-3 py-4">
+        <Timer className="size-5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+            Treino em andamento
+          </p>
+          <p className="truncate text-sm font-semibold">{workout.workoutName}</p>
+          <p className="text-xs text-muted-foreground">
+            {done} de {plural(total, "série feita", "séries feitas")}
+          </p>
+        </div>
+        <Button asChild className="h-11 shrink-0">
+          <Link to="/student/workout/$id" params={{ id: workout.workoutId }}>
+            <Play className="size-4" /> Continuar
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

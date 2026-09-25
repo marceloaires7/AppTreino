@@ -28,7 +28,7 @@
 // CONFIGURATION: sheet schema and constants
 // ===============================================================================================
 
-const API_VERSION = '2.0.0';
+const API_VERSION = '2.1.0';
 
 const SESSION_DAYS = 30;
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -65,7 +65,7 @@ const SCHEMA = {
   [SHEET.EXERCISES]: {
     columns: [
       'ID_Exercicio', 'ID_Treino', 'Ordem', 'Nome', 'Series', 'Reps', 'Carga_kg', 'Descanso_seg',
-      'Link_Video', 'Anotacoes', 'RIR_RPE', 'Exercicio_Substituto',
+      'Link_Video', 'Anotacoes', 'RIR_RPE', 'Exercicio_Substituto', 'Grupo_Muscular', 'Link_Video_Substituto',
     ],
     numeric: ['Ordem', 'Series', 'Carga_kg', 'Descanso_seg'],
   },
@@ -88,6 +88,12 @@ const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
 
 // API value -> value stored in Agenda.Tipo_Atividade.
 const ACTIVITY_TO_SHEET = { workout: 'Workout', cardio: 'Cardio', rest: 'Rest' };
+
+// Target of a set taken to failure, in the API and in Exercicios_Treino.Reps. Typing "falha" or
+// "F" in the sheet means the same; see normalizeReps_().
+const FAILURE_REPS = 'Até a falha';
+// Separates each set's target in Exercicios_Treino.Reps: "12; 10; Até a falha".
+const REPS_SEPARATOR = ';';
 
 // ===============================================================================================
 // ENTRY POINTS AND ROUTING
@@ -116,6 +122,8 @@ const ACTIONS = {
   getTrainerDashboard: { run: getTrainerDashboard_ },
   saveWorkoutSession: { write: true, run: saveWorkoutSession_ },
   saveWorkoutPlan: { write: true, run: saveWorkoutPlan_ },
+  updateWorkoutDescription: { write: true, run: updateWorkoutDescription_ },
+  updateExerciseRest: { write: true, run: updateExerciseRest_ },
   deleteWorkoutPlan: { write: true, run: deleteWorkoutPlan_ },
   updateSchedule: { write: true, run: updateSchedule_ },
 };
@@ -801,8 +809,11 @@ function describeActivity_(daysSince) {
 /**
  * POST acao=saveWorkoutPlan, args [workout]  (trainers for their students; students for themselves)
  * workout is the frontend's Workout:
- * { "id"?: "TR-...", "studentId": "...", "name": "...", "focus"?: "...",
- *   "exercises": [{ "id"?, "name", "sets", "reps", "weight", "restSec", "videoUrl"?, "notes"?, "rir"?, "substitute"? }] }
+ * { "id"?: "TR-...", "studentId": "...", "name": "...", "description"?: "...",
+ *   "exercises": [{ "id"?, "name", "sets", "reps": ["12", "10", "Até a falha"], "weight", "restSec",
+ *                   "videoUrl"?, "notes"?, "rir"?, "muscleGroups"?: ["Peito"], "substitute"?,
+ *                   "substituteVideoUrl"? }] }
+ * `reps` may also be one string for every set ("8-12"), as older versions of the app send it.
  * An `id` that matches an existing Treinos row updates it; otherwise a new workout is created.
  * The workout's old Exercicios_Treino rows are always deleted and the list re-inserted (cascade).
  * Exercise IDs already belonging to this workout are kept so logged history stays linked.
@@ -829,7 +840,8 @@ function saveWorkoutPlan_(user, workout) {
     ID_Treino: workoutId,
     ID_Usuario: studentId,
     Nome_do_Treino: name,
-    Descricao: str_(input.focus !== undefined ? input.focus : input.description),
+    // "focus" is what versions before 2.1.0 called the description.
+    Descricao: str_(input.description !== undefined ? input.description : input.focus),
   };
   if (existing) updateRecord_(SHEET.WORKOUTS, existing, workoutRecord);
   else appendRecords_(SHEET.WORKOUTS, [workoutRecord]);
@@ -844,24 +856,64 @@ function saveWorkoutPlan_(user, workout) {
     let id = str_(ex.id);
     if (!previousIds[id] || usedIds[id]) id = generateId_('EX');
     usedIds[id] = true;
+    const reps = setReps_(ex.reps, Math.max(0, int_(ex.sets)));
     return {
       ID_Exercicio: id,
       ID_Treino: workoutId,
       Ordem: i + 1,
       Nome: str_(ex.name),
-      Series: Math.max(0, int_(ex.sets)),
-      Reps: str_(ex.reps),
+      Series: reps.length,
+      Reps: repsCell_(reps),
       Carga_kg: Math.max(0, num_(ex.weight)),
       Descanso_seg: Math.max(0, int_(ex.restSec)),
       Link_Video: str_(ex.videoUrl),
       Anotacoes: str_(ex.notes),
       RIR_RPE: str_(ex.rir),
       Exercicio_Substituto: str_(ex.substitute),
+      Grupo_Muscular: muscleGroups_(ex.muscleGroups).join(', '),
+      Link_Video_Substituto: str_(ex.substituteVideoUrl),
     };
   });
   replaceRecords_(SHEET.EXERCISES, (r) => sameId_(r.ID_Treino, workoutId), exerciseRecords);
 
   return { workout: toWorkout_(workoutRecord, exerciseRecords), created: !existing };
+}
+
+/**
+ * POST acao=updateWorkoutDescription, args [workoutId, description]  (same access as saveWorkoutPlan)
+ * Changes only Treinos.Descricao, so the workout screen can edit it without resending the plan.
+ * Data: { workout: Workout }
+ */
+function updateWorkoutDescription_(user, workoutId, description) {
+  const row = requireWorkout_(user, workoutId);
+  updateRecord_(SHEET.WORKOUTS, row, { Descricao: str_(description) });
+  return getWorkout_(user, str_(row.ID_Treino));
+}
+
+/**
+ * POST acao=updateExerciseRest, args [exerciseId, restSec]  (same access as saveWorkoutPlan)
+ * Changes only Exercicios_Treino.Descanso_seg, so a student can adjust it mid-workout.
+ * Data: { exercise: Exercise }
+ */
+function updateExerciseRest_(user, exerciseId, restSec) {
+  const id = str_(exerciseId);
+  if (!id) throw new ApiError('Falta o parâmetro "exerciseId"');
+  const row = readTable_(SHEET.EXERCISES).rows.find((r) => sameId_(r.ID_Exercicio, id));
+  if (!row) throw new ApiError(`Exercício "${id}" não encontrado`);
+  requireWorkout_(user, str_(row.ID_Treino));
+  const seconds = Math.max(0, int_(restSec));
+  updateRecord_(SHEET.EXERCISES, row, { Descanso_seg: seconds });
+  return { exercise: toExercise_(Object.assign({}, row, { Descanso_seg: seconds })) };
+}
+
+/** Loads a Treinos row the user may edit: their own (students) or one of their students' (trainers). */
+function requireWorkout_(user, workoutId) {
+  const id = str_(workoutId);
+  if (!id) throw new ApiError('Falta o parâmetro "workoutId"');
+  const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, id));
+  if (!row) throw new ApiError(`Treino "${id}" não encontrado`);
+  accessibleStudent_(user, str_(row.ID_Usuario));
+  return row;
 }
 
 /**
@@ -871,12 +923,7 @@ function saveWorkoutPlan_(user, workout) {
  * Data: { workoutId, deletedExercises, clearedScheduleEntries }
  */
 function deleteWorkoutPlan_(user, workoutId) {
-  const id = str_(workoutId);
-  if (!id) throw new ApiError('Falta o parâmetro "workoutId"');
-  const row = readTable_(SHEET.WORKOUTS).rows.find((r) => sameId_(r.ID_Treino, id));
-  if (!row) throw new ApiError(`Treino "${id}" não encontrado`);
-  accessibleStudent_(user, str_(row.ID_Usuario));
-
+  const id = str_(requireWorkout_(user, workoutId).ID_Treino);
   const matches = (r) => sameId_(r.ID_Treino, id);
   replaceRecords_(SHEET.WORKOUTS, matches, []);
   return {
@@ -1045,23 +1092,23 @@ function seedDemoData() {
   const push = saveWorkoutPlan_(coach, {
     studentId: student.id,
     name: 'Treino A - Peito e Ombros',
-    focus: 'Superiores (empurrar)',
+    description: 'Superiores (empurrar). Aqueça os ombros antes do supino.',
     exercises: [
       { name: 'Supino reto com barra', sets: 4, reps: '8', weight: 80, restSec: 120, rir: 'RIR 2',
-        videoUrl: 'https://www.youtube.com/watch?v=rT7DgCr-3pg', substitute: 'Supino reto com halteres',
-        notes: 'Peito aberto e escápulas retraídas.' },
-      { name: 'Supino inclinado com halteres', sets: 3, reps: '8-10', weight: 28, restSec: 90 },
-      { name: 'Tríceps na polia', sets: 3, reps: '12-15', weight: 30, restSec: 60 },
+        muscleGroups: ['Peito', 'Tríceps'], videoUrl: 'https://www.youtube.com/watch?v=rT7DgCr-3pg',
+        substitute: 'Supino reto com halteres', notes: 'Peito aberto e escápulas retraídas.' },
+      { name: 'Supino inclinado com halteres', sets: 3, reps: '8-10', weight: 28, restSec: 90, muscleGroups: ['Peito', 'Ombros'] },
+      { name: 'Tríceps na polia', sets: 3, reps: ['15', '12', FAILURE_REPS], weight: 30, restSec: 60, muscleGroups: ['Tríceps'] },
     ],
   }).workout;
   const legs = saveWorkoutPlan_(coach, {
     studentId: student.id,
     name: 'Treino B - Pernas',
-    focus: 'Inferiores',
+    description: 'Inferiores',
     exercises: [
       { name: 'Agachamento livre', sets: 5, reps: '5', weight: 100, restSec: 180, rir: 'RPE 8',
-        videoUrl: 'https://www.youtube.com/watch?v=ultWZbUMPL8' },
-      { name: 'Levantamento terra romeno', sets: 3, reps: '10', weight: 70, restSec: 120 },
+        muscleGroups: ['Quadríceps', 'Glúteos'], videoUrl: 'https://www.youtube.com/watch?v=ultWZbUMPL8' },
+      { name: 'Levantamento terra romeno', sets: 3, reps: '10', weight: 70, restSec: 120, muscleGroups: ['Posterior'] },
     ],
   }).workout;
 
@@ -1252,6 +1299,37 @@ function optStr_(v) {
   return s === '' ? undefined : s;
 }
 
+/**
+ * One target per set, from the API's list or from the Reps column. "12; 10; Até a falha" lists each
+ * set; a single value ("12", "8-12") is every set's. `sets` says how many there are: missing
+ * values repeat the last one and extra ones are dropped. With no `sets`, there is one per value.
+ */
+function setReps_(value, sets) {
+  let list;
+  if (Array.isArray(value)) list = value.map(normalizeReps_);
+  else list = str_(value) ? str_(value).split(REPS_SEPARATOR).map(normalizeReps_) : [];
+  const count = sets > 0 ? sets : list.length;
+  return Array.from({ length: count }, (_, i) => (list.length ? list[Math.min(i, list.length - 1)] : ''));
+}
+
+/** The Reps cell for a list of targets: "12" when every set is the same, else "12; 10; Até a falha". */
+function repsCell_(reps) {
+  if (reps.every((r) => r === reps[0])) return reps[0] || '';
+  return reps.join(REPS_SEPARATOR + ' ');
+}
+
+/** "falha", "F", "até a falha" or "failure", in any case, become FAILURE_REPS; the rest stays as typed. */
+function normalizeReps_(value) {
+  const s = str_(value);
+  return /^((at[eé]\s+a\s+)?falha|f|failure)$/i.test(s) ? FAILURE_REPS : s;
+}
+
+/** Grupo_Muscular holds "Peito, Tríceps"; the API uses ["Peito", "Tríceps"]. Accepts either. */
+function muscleGroups_(value) {
+  const list = Array.isArray(value) ? value.map(str_) : str_(value).split(/[,;]/).map(str_);
+  return list.filter((g, i) => g && list.indexOf(g) === i);
+}
+
 /** Parses numbers stored as numbers or text, including pt-BR "80,5" and "1.234,5". */
 function num_(v) {
   if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -1355,18 +1433,22 @@ function toUser_(row) {
 }
 
 function toExercise_(row) {
+  const reps = setReps_(row.Reps, int_(row.Series));
+  const muscleGroups = muscleGroups_(row.Grupo_Muscular);
   return {
     id: str_(row.ID_Exercicio),
     order: int_(row.Ordem),
     name: str_(row.Nome),
-    sets: int_(row.Series),
-    reps: str_(row.Reps),
+    sets: reps.length,
+    reps: reps,
     weight: num_(row.Carga_kg),
     restSec: int_(row.Descanso_seg),
     videoUrl: optStr_(row.Link_Video),
     notes: optStr_(row.Anotacoes),
     rir: optStr_(row.RIR_RPE),
+    muscleGroups: muscleGroups.length ? muscleGroups : undefined,
     substitute: optStr_(row.Exercicio_Substituto),
+    substituteVideoUrl: optStr_(row.Link_Video_Substituto),
   };
 }
 
@@ -1375,7 +1457,7 @@ function toWorkout_(row, exerciseRows) {
     id: str_(row.ID_Treino),
     name: str_(row.Nome_do_Treino),
     studentId: str_(row.ID_Usuario),
-    focus: optStr_(row.Descricao),
+    description: optStr_(row.Descricao),
     exercises: exerciseRows.map(toExercise_).sort((a, b) => a.order - b.order),
   };
 }

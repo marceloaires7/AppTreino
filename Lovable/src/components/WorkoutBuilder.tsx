@@ -4,6 +4,8 @@ import { ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { MuscleGroupPicker } from "@/components/MuscleGroupPicker";
+import { SetRepsEditor } from "@/components/SetRepsEditor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,19 +21,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
+import { inferMuscleGroups, muscleGroupsOf } from "@/lib/muscles";
+import { normalizeReps, resizeReps } from "@/lib/reps";
 import type { Exercise, Workout } from "@/lib/types";
 
 const emptyExercise = (): Exercise => ({
   id: `ex-${Math.random().toString(36).slice(2, 9)}`,
   name: "",
   sets: 3,
-  reps: "10",
+  reps: ["10", "10", "10"],
   weight: 20,
   restSec: 90,
   videoUrl: "",
   notes: "",
   rir: "",
+  muscleGroups: [],
   substitute: "",
+  substituteVideoUrl: "",
 });
 
 interface Props {
@@ -56,8 +62,7 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
 
   const [studentId, setStudentId] = useState(initialStudentId ?? "");
   const [name, setName] = useState("");
-  // Not editable here, but kept so saving does not erase the workout's focus.
-  const [focus, setFocus] = useState<string | undefined>(undefined);
+  const [description, setDescription] = useState("");
   const [exercises, setExercises] = useState<Exercise[]>([emptyExercise()]);
   const ownerId = mode === "student" ? (user?.id ?? "") : studentId;
 
@@ -67,8 +72,15 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
       if (!w) return;
       setName(w.name);
       setStudentId(w.studentId);
-      setFocus(w.focus);
-      setExercises(w.exercises.map((e) => ({ ...e })));
+      setDescription(w.description ?? "");
+      // Groups guessed from the name are filled in here, so they can be checked before saving.
+      setExercises(
+        w.exercises.map((e) => ({
+          ...e,
+          reps: resizeReps(e.reps, Math.max(1, e.reps.length)),
+          muscleGroups: muscleGroupsOf(e),
+        })),
+      );
     });
   }, [workoutId]);
 
@@ -86,8 +98,10 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
       id: workoutId ?? `w-${Date.now()}`,
       name: name.trim(),
       studentId: ownerId,
-      ...(focus ? { focus } : {}),
-      exercises: exercises.filter((e) => e.name.trim()),
+      description: description.trim(),
+      exercises: exercises
+        .filter((e) => e.name.trim())
+        .map((e) => ({ ...e, sets: e.reps.length, reps: e.reps.map(normalizeReps) })),
     };
     await api.saveWorkout(payload);
     toast.success("Treino salvo", {
@@ -127,6 +141,15 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
                 placeholder="Treino A — Peito e ombros"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wdescription">Descrição</Label>
+              <Textarea
+                id="wdescription"
+                placeholder="Objetivo, aquecimento, cuidados…"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
               />
             </div>
             {mode === "trainer" ? (
@@ -171,25 +194,23 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
                 placeholder="Nome do exercício"
                 value={ex.name}
                 onChange={(e) => patch(i, { name: e.target.value })}
+                onBlur={() => {
+                  if (!ex.muscleGroups?.length)
+                    patch(i, { muscleGroups: inferMuscleGroups(ex.name) });
+                }}
+              />
+              <div className="space-y-1">
+                <Label className="text-xs">Grupos musculares</Label>
+                <MuscleGroupPicker
+                  value={ex.muscleGroups ?? []}
+                  onChange={(muscleGroups) => patch(i, { muscleGroups })}
+                />
+              </div>
+              <SetRepsEditor
+                reps={ex.reps}
+                onChange={(reps) => patch(i, { reps, sets: reps.length })}
               />
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Séries</Label>
-                  <Input
-                    className="h-12"
-                    type="number"
-                    value={ex.sets}
-                    onChange={(e) => patch(i, { sets: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Repetições</Label>
-                  <Input
-                    className="h-12"
-                    value={ex.reps}
-                    onChange={(e) => patch(i, { reps: e.target.value })}
-                  />
-                </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Carga (kg)</Label>
                   <Input
@@ -245,6 +266,15 @@ export function WorkoutBuilder({ mode, workoutId, initialStudentId }: Props) {
                     onChange={(e) => patch(i, { substitute: e.target.value })}
                   />
                 </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vídeo do substituto (YouTube / Vimeo)</Label>
+                <Input
+                  className="h-12"
+                  placeholder="https://youtube.com/watch?v=..."
+                  value={ex.substituteVideoUrl ?? ""}
+                  onChange={(e) => patch(i, { substituteVideoUrl: e.target.value })}
+                />
               </div>
             </CardContent>
           </Card>

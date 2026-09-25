@@ -32,3 +32,8 @@ export function formatNumber(value: number): string {
 export function formatDate(iso: string, options?: Intl.DateTimeFormatOptions): string {
   return new Date(iso).toLocaleDateString(LOCALE, options);
 }
+
+/** ["Peito", "Ombros", "Tríceps"] -> "Peito, Ombros e Tríceps". */
+export function formatList(items: string[]): string {
+  return new Intl.ListFormat(LOCALE, { type: "conjunction" }).format(items);
+}

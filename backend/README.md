@@ -60,6 +60,16 @@ by the app. To upgrade:
 The new columns (`Salt`, `SenhaHash`, `CriadoEm`) are added on their own. Everyone has to sign in
 again once, because sessions saved by the old app have no token.
 
+### Upgrading to 2.1.0 (reps per set, muscle groups, substitute video)
+
+Paste the new `Code.gs` and publish a **new version**. The columns `Grupo_Muscular` and
+`Link_Video_Substituto` are added to `Exercicios_Treino` on their own, and existing `Reps` values
+keep working: a single value such as `12` still means 12 on every set. Until the backend is
+updated, the new app still opens workouts, but changing the rest or the description from the
+workout screen fails with `Ação desconhecida`. **Do not save workouts in the builder before
+updating:** the old backend would store the reps as `12,10,8` and drop the muscle groups and the
+substitute video.
+
 ## Accounts
 
 | Task | How |
@@ -121,6 +131,8 @@ trainer yet, which is the same list the dashboard shows.
 | `saveWorkoutSession` | `[session]` | always saved as self | — |
 | `getTrainerDashboard` | `[]` | — | self |
 | `saveWorkoutPlan` | `[workout]` | own workouts (edit mode) | their students |
+| `updateWorkoutDescription` | `[workoutId, description]` | own workouts | their students |
+| `updateExerciseRest` | `[exerciseId, restSec]` | own workouts | their students |
 | `deleteWorkoutPlan` | `[workoutId]` | own workouts (edit mode) | their students |
 | `updateSchedule` | `[schedule]` | own week (edit mode) | their students |
 
@@ -152,10 +164,12 @@ exist. The response never contains the login, `Salt`, `SenhaHash` or `Senha`.
 {
   "user": { "id": "US-aluno", "name": "Aluno Demo", "role": "student", "trainerId": "US-coach", "initials": "AD" },
   "workouts": [{
-    "id": "TR-…", "name": "Treino A - Peito e Ombros", "studentId": "US-aluno", "focus": "Superiores (empurrar)",
-    "exercises": [{ "id": "EX-…", "order": 1, "name": "Supino reto com barra", "sets": 4, "reps": "8",
-                    "weight": 80, "restSec": 120, "videoUrl": "…", "notes": "…", "rir": "RIR 2",
-                    "substitute": "Supino reto com halteres" }]
+    "id": "TR-…", "name": "Treino A - Peito e Ombros", "studentId": "US-aluno",
+    "description": "Superiores (empurrar). Aqueça os ombros antes do supino.",
+    "exercises": [{ "id": "EX-…", "order": 1, "name": "Supino reto com barra", "sets": 3,
+                    "reps": ["12", "10", "Até a falha"], "weight": 80, "restSec": 120, "videoUrl": "…",
+                    "notes": "…", "rir": "RIR 2", "muscleGroups": ["Peito", "Tríceps"],
+                    "substitute": "Supino reto com halteres", "substituteVideoUrl": "…" }]
   }],
   "schedule": { "studentId": "US-aluno", "days": [
     { "day": "Monday", "dayNumber": 1, "type": "workout", "workoutId": "TR-…", "workoutName": "Treino A - Peito e Ombros" },
@@ -166,8 +180,10 @@ exist. The response never contains the login, `Salt`, `SenhaHash` or `Senha`.
 ```
 
 - `sets`, `weight` and `restSec` are always numbers.
-- `reps` is always a string, so ranges like `"8-12"` work.
-- Empty optional fields are left out.
+- `reps` has one string per set, so `sets` is always `reps.length`. Each is a number, a range like
+  `"8-12"`, any other text such as `"10+F"`, or `"Até a falha"` for a set taken to failure.
+- `description` is the `Descricao` column of `Treinos`. Versions before 2.1.0 called it `focus`.
+- Empty optional fields are left out, `muscleGroups` included.
 - `days` covers all 7 days: a day with no Agenda row comes back as `rest`.
 
 ### `getWorkout` → `{ workout }`
@@ -229,14 +245,27 @@ For a student who has never trained, `lastSession` is `null` and `lastActivity` 
 
 ### `saveWorkoutPlan` → `{ workout, created }`
 
-`workout` is the frontend's `Workout`, with `studentId`, `name`, an optional `focus`, and
+`workout` is the frontend's `Workout`, with `studentId`, `name`, an optional `description`, and
 `exercises`.
+
+- `reps` is a list with one target per set. A single string, as older apps send it, applies to
+  every set. `sets` decides how many there are: missing targets repeat the last one.
 
 - An `id` that matches a row in `Treinos` updates that workout. Any other `id` (such as the
   builder's temporary `w-<timestamp>`) creates a new one.
 - The workout's old exercises are deleted and the new list is inserted (cascade).
 - Exercises that already belonged to the workout keep their IDs, so logged history stays linked
   to them.
+
+### `updateWorkoutDescription` → `{ workout }`
+
+Changes only `Treinos.Descricao`, so the workout screen can edit it without sending the whole
+plan. An empty description clears it.
+
+### `updateExerciseRest` → `{ exercise }`
+
+Changes only `Exercicios_Treino.Descanso_seg`, so a student can adjust the rest in the middle of a
+workout. Negative values become 0.
 
 ### `deleteWorkoutPlan` → `{ workoutId, deletedExercises, clearedScheduleEntries }`
 
@@ -262,7 +291,7 @@ Needs the current password. The new one must have at least 6 characters.
 | --- | --- |
 | `Usuarios` | `ID_Usuario`, `Nome`, `Login`, `Role`, `ID_Treinador`, `Salt`, `SenhaHash`, `CriadoEm` |
 | `Treinos` | `ID_Treino`, `ID_Usuario`, `Nome_do_Treino`, `Descricao` |
-| `Exercicios_Treino` | `ID_Exercicio`, `ID_Treino`, `Ordem`, `Nome`, `Series`, `Reps`, `Carga_kg`, `Descanso_seg`, `Link_Video`, `Anotacoes`, `RIR_RPE`, `Exercicio_Substituto` |
+| `Exercicios_Treino` | `ID_Exercicio`, `ID_Treino`, `Ordem`, `Nome`, `Series`, `Reps`, `Carga_kg`, `Descanso_seg`, `Link_Video`, `Anotacoes`, `RIR_RPE`, `Exercicio_Substituto`, `Grupo_Muscular`, `Link_Video_Substituto` |
 | `Agenda` | `ID_Agenda`, `ID_Usuario`, `Dia_Semana`, `Tipo_Atividade`, `ID_Treino`, `Descricao` |
 | `Historico_Execucao` | `ID_Historico`, `ID_Usuario`, `Data`, `Tempo_Duracao_seg`, `Volume_Total`, `ID_Treino` |
 | `Historico_Series` | `ID_Historico`, `ID_Exercicio`, `Serie_Num`, `Reps_Feitas`, `Carga_Usada`, `Nome_Exercicio` |
@@ -274,6 +303,13 @@ Needs the current password. The new one must have at least 6 characters.
   are already text.
 - **Numbers typed as text** are converted when read, including Brazilian formats such as `82,5`
   and `1.234,5`.
+- **Reps per set.** `Reps` holds one value for every set (`12`, `8-12`) or one per set separated by
+  `;` (`12; 10; Até a falha`). `Series` says how many sets there are; when the list is shorter, the
+  last value repeats. `falha`, `F` and `até a falha`, in any case, all mean a set to failure. The
+  app writes a single value when every set is the same.
+- **Muscle groups.** `Grupo_Muscular` lists them separated by commas (`Peito, Tríceps`). When it is
+  empty, the app guesses them from the exercise name and shows the guess; saving the workout in
+  the app stores it.
 - **Concurrency.** All writes run under `LockService`, so two saves at the same moment cannot
   overwrite each other.
 

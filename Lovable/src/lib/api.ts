@@ -3,8 +3,9 @@
  * /exec URL is read from VITE_API_URL at build time.
  */
 import { toast } from "sonner";
+import { resizeReps } from "./reps";
 import { clearSession, readSession, type Session } from "./session";
-import type { Schedule, SessionRecord, User, Workout } from "./types";
+import type { Exercise, Schedule, SessionRecord, User, Workout } from "./types";
 
 /** Backend error code for a missing, expired or forged token: the app signs the user out. */
 export const SESSION_INVALID = "SESSAO_INVALIDA";
@@ -113,6 +114,15 @@ function getStudentData(studentId: string): Promise<StudentData> {
   return entry.promise;
 }
 
+// Backends before 2.1.0 send one `reps` string for every set. Until Code.gs is updated in Apps
+// Script, it is turned into one target per set here.
+function withSetReps(workout: Workout): Workout {
+  const exercises = workout.exercises.map((e) =>
+    Array.isArray(e.reps) ? e : { ...e, reps: resizeReps([String(e.reps)], e.sets) },
+  );
+  return { ...workout, exercises };
+}
+
 export const api = {
   login: (login: string, password: string) =>
     call<Session>("login", [login, password], { quiet: true }),
@@ -125,14 +135,29 @@ export const api = {
   /** The signed-in trainer's students (the trainer comes from the token). */
   getStudents: () => call<{ students: User[] }>("getTrainerDashboard").then((d) => d.students),
 
-  getStudentWorkouts: (studentId: string) => getStudentData(studentId).then((d) => d.workouts),
+  getStudentWorkouts: (studentId: string) =>
+    getStudentData(studentId).then((d) => d.workouts.map(withSetReps)),
 
   getWorkout: (id: string) =>
-    call<{ workout: Workout | null }>("getWorkout", [id]).then((d) => d.workout),
+    call<{ workout: Workout | null }>("getWorkout", [id]).then(
+      (d) => d.workout && withSetReps(d.workout),
+    ),
 
   saveWorkout: (workout: Workout) =>
-    call<{ workout: Workout }>("saveWorkoutPlan", [workout], { write: true }).then(
-      (d) => d.workout,
+    call<{ workout: Workout }>("saveWorkoutPlan", [workout], { write: true }).then((d) =>
+      withSetReps(d.workout),
+    ),
+
+  /** Changes only the description, from the workout screen. */
+  updateWorkoutDescription: (workoutId: string, description: string) =>
+    call<{ workout: Workout }>("updateWorkoutDescription", [workoutId, description], {
+      write: true,
+    }).then((d) => d.workout),
+
+  /** Changes only the exercise's rest in the plan, from the workout screen. */
+  updateExerciseRest: (exerciseId: string, restSec: number) =>
+    call<{ exercise: Exercise }>("updateExerciseRest", [exerciseId, restSec], { write: true }).then(
+      (d) => d.exercise,
     ),
 
   deleteWorkout: (id: string) => call("deleteWorkoutPlan", [id], { write: true }).then(() => true),
@@ -156,13 +181,4 @@ export const api = {
 
 export function calcVolume(exercises: SessionRecord["exercises"]): number {
   return exercises.reduce((sum, ex) => sum + ex.sets.reduce((v, s) => v + s.weight * s.reps, 0), 0);
-}
-
-export function toEmbedUrl(url?: string): string | null {
-  if (!url) return null;
-  const yt = url.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{6,})/);
-  if (yt) return `https://www.youtube-nocookie.com/embed/${yt[1]}`;
-  const vimeo = url.match(/vimeo\.com\/(\d+)/);
-  if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`;
-  return url;
 }

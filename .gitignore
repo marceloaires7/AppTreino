@@ -2,3 +2,9 @@
 APP_EXEMPLO/
 # Phone screenshots shared while testing.
 Print_*
+# Spreadsheets: database exports with personal data and password hashes.
+*.xlsx
+*.xls
+*.csv
+*.ods
+.~lock.*#

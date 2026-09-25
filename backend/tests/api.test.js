@@ -318,7 +318,7 @@ test('getStudentData nests workouts, exercises and a full 7-day schedule', () =>
   assert.equal(data.user.id, 'US-aluno');
   assert.equal(data.user.trainerId, 'US-coach');
   assert.equal(data.workouts.length, 2);
-  assert.equal(push.focus, 'Superiores (empurrar)');
+  assert.equal(push.description, 'Superiores (empurrar). Aqueça os ombros antes do supino.');
   assert.deepEqual(push.exercises.map((e) => e.order), [1, 2, 3]);
 
   const bench = push.exercises[0];
@@ -326,10 +326,13 @@ test('getStudentData nests workouts, exercises and a full 7-day schedule', () =>
   assert.strictEqual(bench.sets, 4);
   assert.strictEqual(bench.weight, 80);
   assert.strictEqual(bench.restSec, 120);
-  assert.strictEqual(bench.reps, '8');
+  assert.deepEqual(bench.reps, ['8', '8', '8', '8'], 'one target per set');
+  assert.deepEqual(bench.muscleGroups, ['Peito', 'Tríceps']);
   assert.equal(bench.substitute, 'Supino reto com halteres');
-  assert.strictEqual(push.exercises[1].reps, '8-10', 'rep ranges survive as text');
-  assert.ok(!('videoUrl' in push.exercises[1]), 'blank optional fields are omitted');
+  assert.deepEqual(push.exercises[1].reps, ['8-10', '8-10', '8-10'], 'rep ranges survive as text');
+  for (const key of ['videoUrl', 'substituteVideoUrl']) {
+    assert.ok(!(key in push.exercises[1]), 'blank optional fields are omitted');
+  }
 
   const days = data.schedule.days;
   assert.deepEqual(days.map((d) => d.day), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
@@ -375,6 +378,7 @@ test('saveWorkoutPlan creates, then updates with cascade and stable exercise IDs
   assert.ok(created.workout.exercises.every((e) => /^EX-/.test(e.id)));
   assert.strictEqual(created.workout.exercises[0].sets, 4);
   assert.strictEqual(created.workout.exercises[0].weight, 120);
+  assert.equal(created.workout.description, 'Upper pull', 'older apps send the description as "focus"');
 
   const bench = push.exercises[0];
   const updated = ok(gas.call('saveWorkoutPlan', [{
@@ -396,6 +400,109 @@ test('saveWorkoutPlan creates, then updates with cascade and stable exercise IDs
   fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', exercises: [] }], coach), /nome do treino/);
   fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'X', exercises: [{ sets: 3 }] }], coach), /exercício 1 está sem nome/);
   fail(gas.call('saveWorkoutPlan', [{ studentId: 'US-coach', name: 'X' }], coach), /não é aluno/);
+});
+
+test('reps hold one target per set, including "Até a falha"', () => {
+  const { gas, coach, aluno, push } = seeded();
+  const sheet = gas.sheet('Exercicios_Treino');
+  const cell = (id) => sheet.records().find((r) => r.ID_Exercicio === id);
+
+  // Seeded with ['15', '12', 'Até a falha']: the sheet lists each set; uniform sets keep one value.
+  const triceps = push.exercises[2];
+  assert.deepEqual(triceps.reps, ['15', '12', 'Até a falha']);
+  assert.strictEqual(triceps.sets, 3);
+  assert.equal(cell(triceps.id).Reps, '15; 12; Até a falha');
+  assert.equal(cell(push.exercises[0].id).Reps, '8');
+
+  // Typed by hand: "falha" and "F" mean failure, and the last value fills the remaining sets.
+  const row = sheet.records().findIndex((r) => r.ID_Exercicio === triceps.id) + 2;
+  sheet.setRaw(row, 5, 4); // Series
+  sheet.setRaw(row, 6, '12;10 ; falha'); // Reps
+  const read = () => ok(gas.call('getWorkout', [push.id], aluno)).workout.exercises[2];
+  assert.deepEqual(read().reps, ['12', '10', 'Até a falha', 'Até a falha']);
+  sheet.setRaw(row, 6, 'F');
+  assert.deepEqual(read().reps, Array(4).fill('Até a falha'));
+  // With no Series, there is one set per value.
+  sheet.setRaw(row, 5, '');
+  sheet.setRaw(row, 6, '12; 10');
+  assert.deepEqual(read().reps, ['12', '10']);
+  assert.strictEqual(read().sets, 2);
+
+  const save = (exercise) => ok(gas.call('saveWorkoutPlan', [{ studentId: 'US-aluno', name: 'Reps', exercises: [exercise] }], coach)).workout.exercises[0];
+  // Older apps send one string for every set.
+  const legacy = save({ name: 'Remada', sets: 3, reps: '8-12' });
+  assert.deepEqual(legacy.reps, ['8-12', '8-12', '8-12']);
+  assert.equal(cell(legacy.id).Reps, '8-12');
+  // `sets` wins over the list; without it the list decides.
+  assert.deepEqual(save({ name: 'Remada', sets: 2, reps: ['12', '10', '8'] }).reps, ['12', '10']);
+  const fromList = save({ name: 'Remada', reps: ['12', 'até a falha'] });
+  assert.deepEqual(fromList.reps, ['12', 'Até a falha']);
+  assert.strictEqual(cell(fromList.id).Series, 2);
+});
+
+test('exercises keep muscle groups and a substitute video; workouts keep a description', () => {
+  const { gas, coach, aluno } = seeded();
+  const saved = ok(gas.call('saveWorkoutPlan', [{
+    studentId: 'US-aluno',
+    name: 'Costas',
+    description: 'Puxe com os cotovelos.\nSem balanço.',
+    exercises: [
+      { name: 'Puxada', sets: 3, reps: ['10'], muscleGroups: ['Costas', ' Bíceps ', 'Costas', ''],
+        substitute: 'Barra fixa', substituteVideoUrl: 'https://youtu.be/abcdefghijk' },
+      { name: 'Remada', sets: 3, reps: ['10'], muscleGroups: [] },
+    ],
+  }], coach)).workout;
+
+  const row = gas.sheet('Exercicios_Treino').records().find((r) => r.ID_Exercicio === saved.exercises[0].id);
+  assert.equal(row.Grupo_Muscular, 'Costas, Bíceps');
+  assert.equal(row.Link_Video_Substituto, 'https://youtu.be/abcdefghijk');
+  assert.equal(gas.sheet('Treinos').records().find((r) => r.ID_Treino === saved.id).Descricao, 'Puxe com os cotovelos.\nSem balanço.');
+
+  const workout = ok(gas.call('getWorkout', [saved.id], aluno)).workout;
+  assert.equal(workout.description, 'Puxe com os cotovelos.\nSem balanço.');
+  assert.deepEqual(workout.exercises[0].muscleGroups, ['Costas', 'Bíceps']);
+  assert.equal(workout.exercises[0].substituteVideoUrl, 'https://youtu.be/abcdefghijk');
+  assert.ok(!('muscleGroups' in workout.exercises[1]), 'no groups: the key is omitted');
+
+  // Typed by hand with ";" instead of ",".
+  const sheet = gas.sheet('Exercicios_Treino');
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  sheet.setRaw(sheet.records().findIndex((r) => r.ID_Exercicio === saved.exercises[1].id) + 2, header.indexOf('Grupo_Muscular') + 1, 'Costas;Lombar');
+  assert.deepEqual(ok(gas.call('getWorkout', [saved.id], aluno)).workout.exercises[1].muscleGroups, ['Costas', 'Lombar']);
+});
+
+test('updateWorkoutDescription and updateExerciseRest change one cell, with the plan\'s access rules', () => {
+  const { gas, coach, aluno, push } = seeded();
+  addUsers(gas, [
+    { login: 'coach2', senha: 'secret1', nome: 'Other Coach', role: 'Trainer' },
+    { login: 'other', senha: 'secret1', nome: 'Other', role: 'Student', treinador: 'coach' },
+  ]);
+  const exercisesBefore = gas.sheet('Exercicios_Treino').records();
+
+  // The student edits their own workout from the workout screen.
+  const workout = ok(gas.call('updateWorkoutDescription', [push.id, '  Foco na descida.  '], aluno)).workout;
+  assert.equal(workout.description, 'Foco na descida.');
+  assert.deepEqual(workout.exercises, push.exercises, 'exercises untouched');
+  assert.equal(gas.sheet('Treinos').records().find((r) => r.ID_Treino === push.id).Nome_do_Treino, push.name);
+  assert.ok(!('description' in ok(gas.call('updateWorkoutDescription', [push.id, ''], coach)).workout), 'cleared by the trainer');
+
+  const bench = push.exercises[0];
+  const exercise = ok(gas.call('updateExerciseRest', [bench.id, '75'], aluno)).exercise;
+  assert.deepEqual(exercise, { ...bench, restSec: 75 });
+  const rows = gas.sheet('Exercicios_Treino').records();
+  assert.deepEqual(rows, exercisesBefore.map((r) => (r.ID_Exercicio === bench.id ? { ...r, Descanso_seg: 75 } : r)), 'only that cell changed');
+  assert.strictEqual(ok(gas.call('updateExerciseRest', [bench.id, -30], coach)).exercise.restSec, 0);
+
+  const other = token(gas, 'other', 'secret1');
+  const coach2 = token(gas, 'coach2', 'secret1');
+  fail(gas.call('updateWorkoutDescription', [push.id, 'x'], other), /não tem acesso/);
+  fail(gas.call('updateWorkoutDescription', [push.id, 'x'], coach2), /não tem acesso/);
+  fail(gas.call('updateExerciseRest', [bench.id, 60], other), /não tem acesso/);
+  fail(gas.call('updateExerciseRest', [bench.id, 60], coach2), /não tem acesso/);
+  fail(gas.call('updateWorkoutDescription', [], aluno), /workoutId/);
+  fail(gas.call('updateWorkoutDescription', ['TR-nope', 'x'], aluno), /não encontrado/);
+  fail(gas.call('updateExerciseRest', [], aluno), /exerciseId/);
+  fail(gas.call('updateExerciseRest', ['EX-nope', 60], aluno), /não encontrado/);
 });
 
 test('saveWorkoutSession accepts the frontend SessionRecord and bulk-inserts the sets', () => {

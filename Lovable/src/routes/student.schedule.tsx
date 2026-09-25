@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useRequireRole } from "@/hooks/useRequireRole";
 import { api } from "@/lib/api";
 import { dayLabel, plural } from "@/lib/format";
+import { formatMuscleGroups } from "@/lib/muscles";
 import { WEEK_DAYS } from "@/lib/types";
 import { studentTabs } from "./student.index";
 
@@ -90,8 +91,13 @@ function SchedulePage() {
                             : "Descanso"}
                       </p>
                       {entry?.type === "workout" && workout ? (
-                        <p className="text-xs text-muted-foreground">
-                          {plural(workout.exercises.length, "exercício", "exercícios")}
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {[
+                            plural(workout.exercises.length, "exercício", "exercícios"),
+                            formatMuscleGroups(workout.exercises),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       ) : null}
                     </div>

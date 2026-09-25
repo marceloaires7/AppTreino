@@ -17,6 +17,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { dayLabel, plural } from "@/lib/format";
+import { formatMuscleGroups } from "@/lib/muscles";
 import { WEEK_DAYS, type Schedule } from "@/lib/types";
 import { ProgressCharts } from "@/routes/student.stats";
 
@@ -108,9 +109,13 @@ export function StudentManager({ mode, studentId: id }: Props) {
                     <Dumbbell className="size-5 text-primary" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{w.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {plural(w.exercises.length, "exercício", "exercícios")} ·{" "}
-                        {w.focus ?? "Geral"}
+                      <p className="line-clamp-2 text-xs text-muted-foreground">
+                        {[
+                          plural(w.exercises.length, "exercício", "exercícios"),
+                          formatMuscleGroups(w.exercises),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </div>
                     <Button

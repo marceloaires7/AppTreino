@@ -4,30 +4,33 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 
 interface Props {
-  seconds: number;
+  /** Epoch milliseconds. */
+  endsAt: number;
+  totalSec: number;
+  onAdd: (seconds: number) => void;
   onDone: () => void;
 }
 
-export function RestTimer({ seconds, onDone }: Props) {
-  const [total, setTotal] = useState(seconds);
-  const [left, setLeft] = useState(seconds);
+/**
+ * Rest countdown. It follows the clock rather than counting ticks, so it stays right when the
+ * phone locks, the app goes to the background or the student leaves the screen and comes back.
+ */
+export function RestTimer({ endsAt, totalSec, onAdd, onDone }: Props) {
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    setTotal(seconds);
-    setLeft(seconds);
-  }, [seconds]);
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, []);
+
+  const left = Math.max(0, Math.ceil((endsAt - now) / 1000));
 
   useEffect(() => {
-    if (left <= 0) {
-      onDone();
-      return;
-    }
-    const id = setTimeout(() => setLeft((v) => v - 1), 1000);
-    return () => clearTimeout(id);
+    if (left <= 0) onDone();
   }, [left, onDone]);
 
-  const mm = String(Math.floor(Math.max(left, 0) / 60)).padStart(2, "0");
-  const ss = String(Math.max(left, 0) % 60).padStart(2, "0");
+  const mm = String(Math.floor(left / 60)).padStart(2, "0");
+  const ss = String(left % 60).padStart(2, "0");
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-md border-t border-primary/40 bg-card p-4 shadow-[0_-8px_40px_-12px_var(--primary)]">
@@ -41,21 +44,14 @@ export function RestTimer({ seconds, onDone }: Props) {
             {mm}:{ss}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          className="h-11"
-          onClick={() => {
-            setTotal((t) => t + 30);
-            setLeft((v) => v + 30);
-          }}
-        >
+        <Button variant="secondary" className="h-11" onClick={() => onAdd(30)}>
           <Plus className="size-4" /> 30s
         </Button>
         <Button className="h-11" onClick={onDone}>
           <SkipForward className="size-4" /> Pular
         </Button>
       </div>
-      <Progress value={(1 - left / Math.max(total, 1)) * 100} className="mt-3 h-2" />
+      <Progress value={(1 - left / Math.max(totalSec, 1)) * 100} className="mt-3 h-2" />
     </div>
   );
 }
